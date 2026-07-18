@@ -35,7 +35,8 @@ function lonLatToTile(lon, lat, zoom) {
 }
 
 for (const path of process.argv.slice(2)) {
-  const source = new LocalSource(path);
+  const remote = /^https?:\/\//i.test(path);
+  const source = remote ? path : new LocalSource(path);
   const archive = new PMTiles(source);
   const header = await archive.getHeader();
   const metadata = await archive.getMetadata();
@@ -50,5 +51,5 @@ for (const path of process.argv.slice(2)) {
     centerTileBytes: tile?.data.byteLength ?? 0,
     vectorLayers: metadata?.vector_layers?.map((layer) => layer.id) ?? [],
   }));
-  await source.close();
+  if (!remote) await source.close();
 }
