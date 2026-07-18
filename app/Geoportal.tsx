@@ -314,7 +314,7 @@ export default function Geoportal() {
             vectorTileLayerStyles: {
               [tileSources.segments.layerName]: (properties: Record<string, unknown>) => {
                 const color = segmentColor(properties.PromDias, symbolData);
-                return { color, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
+                return { color, fill: true, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
               },
             },
           });
@@ -332,7 +332,7 @@ export default function Geoportal() {
             renderer,
             style: (feature) => {
               const color = segmentColor(feature?.properties?.PromDias, symbolData);
-              return { color, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
+              return { color, fill: true, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
             },
             onEachFeature: chooseFeature as never,
           });
@@ -347,6 +347,7 @@ export default function Geoportal() {
             vectorTileLayerStyles: {
               [tileSources.vegetation.layerName]: (properties: Record<string, unknown>) => ({
                 color: "#102f28",
+                fill: true,
                 fillColor: vegetationColor(properties.CLASE1, symbolData),
                 fillOpacity: 0.93,
                 opacity: 0.56,
@@ -368,6 +369,7 @@ export default function Geoportal() {
             renderer,
             style: (feature) => ({
               color: "#102f28",
+              fill: true,
               fillColor: vegetationColor(feature?.properties?.CLASE1, symbolData),
               fillOpacity: 0.93,
               opacity: 0.56,
