@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import maplibregl, { type Map as MapLibreMap } from "maplibre-gl";
+import type { GeoJSON as LeafletGeoJSON, Map as LeafletMap, TileLayer } from "leaflet";
 import { feature as topojsonFeature } from "topojson-client";
 import {
   Area,
@@ -17,14 +17,16 @@ import {
 } from "recharts";
 import {
   ChevronDown,
+  Check,
   Droplets,
   Layers3,
   Leaf,
   LocateFixed,
+  Map as MapIcon,
   Search,
   X,
 } from "lucide-react";
-import "maplibre-gl/dist/maplibre-gl.css";
+import "leaflet/dist/leaflet.css";
 
 type ThemeMode = "vegetation" | "segments";
 
@@ -87,6 +89,39 @@ const BOUNDS: [[number, number], [number, number]] = [
   [-61.5452, -10.394],
 ];
 
+const BASE_MAPS = {
+  topographic: {
+    label: "Topográfico",
+    description: "Relieve, ríos y localidades",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Esri, HERE, Garmin, FAO, NOAA, USGS",
+    tone: "topographic",
+  },
+  satellite: {
+    label: "Satélite",
+    description: "Imagen aérea del territorio",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Esri, Maxar, Earthstar Geographics",
+    tone: "satellite",
+  },
+  streets: {
+    label: "Calles",
+    description: "Vías, poblaciones y límites",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/World_Street_Map/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Esri, HERE, Garmin, OpenStreetMap contributors",
+    tone: "streets",
+  },
+  lightGray: {
+    label: "Gris claro",
+    description: "Base neutra para análisis",
+    url: "https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Light_Gray_Base/MapServer/tile/{z}/{y}/{x}",
+    attribution: "Esri, HERE, Garmin",
+    tone: "light-gray",
+  },
+} as const;
+
+type BaseMapKey = keyof typeof BASE_MAPS;
+
 const compact = new Intl.NumberFormat("es-BO", { maximumFractionDigits: 1 });
 const detailed = new Intl.NumberFormat("es-BO", { maximumFractionDigits: 2 });
 
@@ -96,26 +131,21 @@ function topologyToFeatures(topology: Record<string, unknown>): GeoFeatureCollec
   return topojsonFeature(topology as never, object as never) as unknown as GeoFeatureCollection;
 }
 
-function vegetationExpression(symbols: SymbolData) {
-  const values: unknown[] = ["match", ["get", symbols.vegetation.field]];
-  Object.entries(symbols.vegetation.classes).forEach(([classId, symbol]) => {
-    values.push(classId, symbol.color);
-  });
-  values.push("#8fa79a");
-  return values;
+function vegetationColor(classId: unknown, symbols: SymbolData) {
+  return symbols.vegetation.classes[String(classId)]?.color ?? "#8fa79a";
 }
 
-function segmentExpression(symbols: SymbolData) {
+function segmentColor(value: unknown, symbols: SymbolData) {
   const breaks = symbols.segments.breaks;
-  const values: unknown[] = [
-    "step",
-    ["to-number", ["get", symbols.segments.field]],
-    breaks[0]?.color ?? "#b8e4e7",
-  ];
-  breaks.slice(0, -1).forEach((item, index) => {
-    values.push(item.upper, breaks[index + 1].color);
-  });
-  return values;
+  const numeric = Number(value);
+  return breaks.find((item) => numeric <= item.upper)?.color ?? breaks.at(-1)?.color ?? "#b8e4e7";
+}
+
+function leafletBounds(bounds: [[number, number], [number, number]]) {
+  return [
+    [bounds[0][1], bounds[0][0]],
+    [bounds[1][1], bounds[1][0]],
+  ] as [[number, number], [number, number]];
 }
 
 function coordinatesBounds(features: GeoFeature[]) {
@@ -153,7 +183,12 @@ function cleanDescription(description: string, classId: string) {
 
 export default function Geoportal() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
-  const mapRef = useRef<MapLibreMap | null>(null);
+  const mapRef = useRef<LeafletMap | null>(null);
+  const leafletRef = useRef<typeof import("leaflet") | null>(null);
+  const vegetationLayerRef = useRef<LeafletGeoJSON | null>(null);
+  const segmentsLayerRef = useRef<LeafletGeoJSON | null>(null);
+  const selectedLayerRef = useRef<LeafletGeoJSON | null>(null);
+  const baseLayerRef = useRef<TileLayer | null>(null);
   const vegetationFeatures = useRef<GeoFeature[]>([]);
   const [seriesData, setSeriesData] = useState<TimeSeriesData | null>(null);
   const [symbols, setSymbols] = useState<SymbolData | null>(null);
@@ -163,6 +198,8 @@ export default function Geoportal() {
   const [query, setQuery] = useState("");
   const [searchOpen, setSearchOpen] = useState(false);
   const [legendOpen, setLegendOpen] = useState(true);
+  const [baseMap, setBaseMap] = useState<BaseMapKey>("topographic");
+  const [baseMapOpen, setBaseMapOpen] = useState(false);
   const [panelOpen, setPanelOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -170,12 +207,13 @@ export default function Geoportal() {
   useEffect(() => {
     let cancelled = false;
     Promise.all([
+      import("leaflet"),
       fetch("/data/vegetacion_moxos.topojson").then((response) => response.json()),
       fetch("/data/segmentos.topojson").then((response) => response.json()),
       fetch("/data/vegetation-timeseries.json").then((response) => response.json()),
       fetch("/data/symbology.json").then((response) => response.json()),
     ])
-      .then(([vegetationTopology, segmentTopology, timeSeries, symbolData]) => {
+      .then(([L, vegetationTopology, segmentTopology, timeSeries, symbolData]) => {
         if (cancelled || !mapContainer.current) return;
         const vegetation = topologyToFeatures(vegetationTopology);
         const segments = topologyToFeatures(segmentTopology);
@@ -183,88 +221,56 @@ export default function Geoportal() {
         setSeriesData(timeSeries);
         setSymbols(symbolData);
 
-        const map = new maplibregl.Map({
-          container: mapContainer.current,
-          bounds: symbolData.extents?.Vegetacion_Moxos ?? BOUNDS,
-          fitBoundsOptions: { padding: 44 },
+        leafletRef.current = L;
+        const map = L.map(mapContainer.current, {
+          preferCanvas: true,
+          zoomControl: false,
+          attributionControl: true,
           minZoom: 5,
-          maxZoom: 16,
-          attributionControl: false,
-          style: {
-            version: 8,
-            sources: {
-              topographic: {
-                type: "raster",
-                tiles: [
-                  "https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}",
-                ],
-                tileSize: 256,
-                attribution: "Esri, HERE, Garmin, FAO, NOAA, USGS, OpenStreetMap contributors",
-              },
-            },
-            layers: [{ id: "basemap", type: "raster", source: "topographic" }],
-          },
+          maxZoom: 17,
         });
         mapRef.current = map;
-        map.addControl(new maplibregl.NavigationControl({ showCompass: false }), "bottom-left");
-        map.addControl(new maplibregl.AttributionControl({ compact: true }), "bottom-right");
 
-        map.on("load", () => {
-          map.addSource("segments", { type: "geojson", data: segments as never });
-          map.addSource("vegetation", { type: "geojson", data: vegetation as never });
-          map.addLayer({
-            id: "segments-fill",
-            type: "fill",
-            source: "segments",
-            layout: { visibility: "none" },
-            paint: { "fill-color": segmentExpression(symbolData) as never, "fill-opacity": 0.92 },
-          });
-          map.addLayer({
-            id: "segments-line",
-            type: "line",
-            source: "segments",
-            layout: { visibility: "none" },
-            paint: {
-              "line-color": segmentExpression(symbolData) as never,
-              "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.15, 11, 0.7],
-            },
-          });
-          map.addLayer({
-            id: "vegetation-fill",
-            type: "fill",
-            source: "vegetation",
-            paint: { "fill-color": vegetationExpression(symbolData) as never, "fill-opacity": 0.93 },
-          });
-          map.addLayer({
-            id: "vegetation-line",
-            type: "line",
-            source: "vegetation",
-            paint: {
-              "line-color": "#102f28",
-              "line-opacity": 0.55,
-              "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.22, 11, 1.1],
-            },
-          });
-          map.addLayer({
-            id: "selected-outline",
-            type: "line",
-            source: "vegetation",
-            filter: ["==", ["get", "CLASE1"], ""],
-            paint: { "line-color": "#fff9e8", "line-width": 3, "line-blur": 0.3 },
-          });
+        L.control.zoom({ position: "bottomleft" }).addTo(map);
+        baseLayerRef.current = L.tileLayer(BASE_MAPS.topographic.url, {
+          attribution: BASE_MAPS.topographic.attribution,
+          maxZoom: 17,
+        }).addTo(map);
 
-          const chooseFeature = (event: maplibregl.MapLayerMouseEvent) => {
-            const classId = event.features?.[0]?.properties?.CLASE1;
+        const renderer = L.canvas({ padding: 0.45 });
+        const chooseFeature = (feature: GeoFeature | undefined, layer: import("leaflet").Layer) => {
+          layer.on("click", () => {
+            const classId = feature?.properties?.CLASE1;
             if (classId) {
               setSelectedClass(String(classId));
               setPanelOpen(true);
             }
-          };
-          ["vegetation-fill", "segments-fill"].forEach((layer) => {
-            map.on("click", layer, chooseFeature);
-            map.on("mouseenter", layer, () => (map.getCanvas().style.cursor = "pointer"));
-            map.on("mouseleave", layer, () => (map.getCanvas().style.cursor = ""));
           });
+        };
+
+        segmentsLayerRef.current = L.geoJSON(segments as never, {
+          renderer,
+          style: (feature) => {
+            const color = segmentColor(feature?.properties?.PromDias, symbolData);
+            return { color, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
+          },
+          onEachFeature: chooseFeature as never,
+        });
+        vegetationLayerRef.current = L.geoJSON(vegetation as never, {
+          renderer,
+          style: (feature) => ({
+            color: "#102f28",
+            fillColor: vegetationColor(feature?.properties?.CLASE1, symbolData),
+            fillOpacity: 0.93,
+            opacity: 0.56,
+            weight: 0.55,
+          }),
+          onEachFeature: chooseFeature as never,
+        }).addTo(map);
+
+        map.fitBounds(leafletBounds(symbolData.extents?.Vegetacion_Moxos ?? BOUNDS), { padding: [44, 44] });
+        map.whenReady(() => {
+          window.setTimeout(() => map.invalidateSize(), 0);
           setLoading(false);
         });
       })
@@ -283,18 +289,48 @@ export default function Geoportal() {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map?.isStyleLoaded()) return;
-    const vegetationVisibility = mode === "vegetation" ? "visible" : "none";
-    const segmentVisibility = mode === "segments" ? "visible" : "none";
-    ["vegetation-fill", "vegetation-line"].forEach((layer) => map.setLayoutProperty(layer, "visibility", vegetationVisibility));
-    ["segments-fill", "segments-line"].forEach((layer) => map.setLayoutProperty(layer, "visibility", segmentVisibility));
+    const vegetationLayer = vegetationLayerRef.current;
+    const segmentsLayer = segmentsLayerRef.current;
+    if (!map || !vegetationLayer || !segmentsLayer) return;
+    if (mode === "vegetation") {
+      if (map.hasLayer(segmentsLayer)) map.removeLayer(segmentsLayer);
+      if (!map.hasLayer(vegetationLayer)) vegetationLayer.addTo(map);
+    } else {
+      if (map.hasLayer(vegetationLayer)) map.removeLayer(vegetationLayer);
+      if (!map.hasLayer(segmentsLayer)) segmentsLayer.addTo(map);
+    }
   }, [mode]);
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map?.isStyleLoaded() || !map.getLayer("selected-outline")) return;
-    map.setFilter("selected-outline", ["==", ["get", "CLASE1"], selectedClass ?? ""]);
+    const L = leafletRef.current;
+    if (!map || !L) return;
+    if (selectedLayerRef.current) {
+      map.removeLayer(selectedLayerRef.current);
+      selectedLayerRef.current = null;
+    }
+    if (!selectedClass) return;
+    const matches = vegetationFeatures.current.filter((item) => String(item.properties.CLASE1) === selectedClass);
+    if (!matches.length) return;
+    selectedLayerRef.current = L.geoJSON({ type: "FeatureCollection", features: matches } as never, {
+      renderer: L.canvas({ padding: 0.45 }),
+      interactive: false,
+      style: { color: "#fff9e8", fillOpacity: 0, opacity: 1, weight: 3 },
+    }).addTo(map);
   }, [selectedClass]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const L = leafletRef.current;
+    if (!map || !L) return;
+    if (baseLayerRef.current) map.removeLayer(baseLayerRef.current);
+    const definition = BASE_MAPS[baseMap];
+    baseLayerRef.current = L.tileLayer(definition.url, {
+      attribution: definition.attribution,
+      maxZoom: 17,
+    }).addTo(map);
+    baseLayerRef.current.bringToBack();
+  }, [baseMap]);
 
   const classList = useMemo(() => {
     if (!seriesData) return [];
@@ -326,10 +362,10 @@ export default function Geoportal() {
     if (!zoom) return;
     const matches = vegetationFeatures.current.filter((item) => String(item.properties.CLASE1) === classId);
     const bounds = coordinatesBounds(matches);
-    if (bounds) mapRef.current?.fitBounds(bounds, { padding: 80, maxZoom: 10, duration: 900 });
+    if (bounds) mapRef.current?.fitBounds(leafletBounds(bounds), { padding: [80, 80], maxZoom: 10, animate: true, duration: 0.9 });
   };
 
-  const resetExtent = () => mapRef.current?.fitBounds(symbols?.extents?.Vegetacion_Moxos ?? BOUNDS, { padding: 44, duration: 900 });
+  const resetExtent = () => mapRef.current?.fitBounds(leafletBounds(symbols?.extents?.Vegetacion_Moxos ?? BOUNDS), { padding: [44, 44], animate: true, duration: 0.9 });
 
   return (
     <main className="geoportal-shell">
@@ -427,6 +463,34 @@ export default function Geoportal() {
             <span><strong>8</strong> días</span>
           </div>
         )}
+
+        <div className={`basemap-control ${baseMapOpen ? "open" : ""}`}>
+          <button
+            className="basemap-trigger"
+            onClick={() => setBaseMapOpen(!baseMapOpen)}
+            aria-expanded={baseMapOpen}
+            aria-label="Seleccionar mapa base"
+          >
+            <MapIcon size={16} />
+            <span><small>Mapa base</small><strong>{BASE_MAPS[baseMap].label}</strong></span>
+            <ChevronDown size={15} />
+          </button>
+          {baseMapOpen && (
+            <div className="basemap-menu">
+              {Object.entries(BASE_MAPS).map(([key, item]) => (
+                <button
+                  key={key}
+                  className={baseMap === key ? "active" : ""}
+                  onClick={() => { setBaseMap(key as BaseMapKey); setBaseMapOpen(false); }}
+                >
+                  <i className={`basemap-swatch ${item.tone}`} />
+                  <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                  {baseMap === key && <Check size={15} />}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
 
         {loading && <div className="loading-screen"><span /><p>Preparando el territorio</p></div>}
         {loadError && <div className="error-screen"><strong>No fue posible abrir el geoportal</strong><p>{loadError}</p></div>}
