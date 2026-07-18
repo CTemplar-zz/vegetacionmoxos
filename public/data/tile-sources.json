@@ -1,0 +1,14 @@
+{
+  "vegetation": {
+    "url": "",
+    "layerName": "vegetacion",
+    "minZoom": 5,
+    "maxZoom": 13
+  },
+  "segments": {
+    "url": "",
+    "layerName": "segmentos",
+    "minZoom": 5,
+    "maxZoom": 13
+  }
+}

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { GeoJSON as LeafletGeoJSON, Map as LeafletMap, TileLayer } from "leaflet";
+import type { GeoJSON as LeafletGeoJSON, Layer as LeafletLayer, Map as LeafletMap, TileLayer } from "leaflet";
 import { feature as topojsonFeature } from "topojson-client";
 import {
   Area,
@@ -23,12 +23,26 @@ import {
   Leaf,
   LocateFixed,
   Map as MapIcon,
+  Eye,
+  EyeOff,
   Search,
   X,
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
 type ThemeMode = "vegetation" | "segments";
+
+type TileSource = {
+  url: string;
+  layerName: string;
+  minZoom: number;
+  maxZoom: number;
+};
+
+type TileSourcesConfig = {
+  vegetation: TileSource;
+  segments: TileSource;
+};
 
 type AnnualValue = {
   year: number;
@@ -185,14 +199,15 @@ export default function Geoportal() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
-  const vegetationLayerRef = useRef<LeafletGeoJSON | null>(null);
-  const segmentsLayerRef = useRef<LeafletGeoJSON | null>(null);
+  const vegetationLayerRef = useRef<LeafletLayer | null>(null);
+  const segmentsLayerRef = useRef<LeafletLayer | null>(null);
   const selectedLayerRef = useRef<LeafletGeoJSON | null>(null);
   const baseLayerRef = useRef<TileLayer | null>(null);
   const vegetationFeatures = useRef<GeoFeature[]>([]);
   const [seriesData, setSeriesData] = useState<TimeSeriesData | null>(null);
   const [symbols, setSymbols] = useState<SymbolData | null>(null);
   const [mode, setMode] = useState<ThemeMode>("vegetation");
+  const [layerVisibility, setLayerVisibility] = useState({ vegetation: true, segments: false });
   const [selectedClass, setSelectedClass] = useState<string | null>(null);
   const [year, setYear] = useState<string>("all");
   const [query, setQuery] = useState("");
@@ -212,9 +227,12 @@ export default function Geoportal() {
       fetch("/data/segmentos.topojson").then((response) => response.json()),
       fetch("/data/vegetation-timeseries.json").then((response) => response.json()),
       fetch("/data/symbology.json").then((response) => response.json()),
+      fetch("/data/tile-sources.json").then((response) => response.json()) as Promise<TileSourcesConfig>,
     ])
-      .then(([L, vegetationTopology, segmentTopology, timeSeries, symbolData]) => {
+      .then(async ([L, vegetationTopology, segmentTopology, timeSeries, symbolData, tileSources]) => {
         if (cancelled || !mapContainer.current) return;
+        (window as Window & { L?: typeof L }).L = L;
+        await import("leaflet.vectorgrid");
         const vegetation = topologyToFeatures(vegetationTopology);
         const segments = topologyToFeatures(segmentTopology);
         vegetationFeatures.current = vegetation.features;
@@ -227,14 +245,14 @@ export default function Geoportal() {
           zoomControl: false,
           attributionControl: true,
           minZoom: 5,
-          maxZoom: 17,
+          maxZoom: 13,
         });
         mapRef.current = map;
 
         L.control.zoom({ position: "bottomleft" }).addTo(map);
         baseLayerRef.current = L.tileLayer(BASE_MAPS.topographic.url, {
           attribution: BASE_MAPS.topographic.attribution,
-          maxZoom: 17,
+          maxZoom: 13,
         }).addTo(map);
 
         const renderer = L.canvas({ padding: 0.45 });
@@ -248,25 +266,81 @@ export default function Geoportal() {
           });
         };
 
-        segmentsLayerRef.current = L.geoJSON(segments as never, {
-          renderer,
-          style: (feature) => {
-            const color = segmentColor(feature?.properties?.PromDias, symbolData);
-            return { color, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
-          },
-          onEachFeature: chooseFeature as never,
-        });
-        vegetationLayerRef.current = L.geoJSON(vegetation as never, {
-          renderer,
-          style: (feature) => ({
-            color: "#102f28",
-            fillColor: vegetationColor(feature?.properties?.CLASE1, symbolData),
-            fillOpacity: 0.93,
-            opacity: 0.56,
-            weight: 0.55,
-          }),
-          onEachFeature: chooseFeature as never,
-        }).addTo(map);
+        const vectorGrid = (L as typeof L & {
+          vectorGrid?: {
+            protobuf: (url: string, options: Record<string, unknown>) => LeafletLayer;
+          };
+        }).vectorGrid;
+
+        if (tileSources.segments.url && vectorGrid) {
+          const segmentsTiles = vectorGrid.protobuf(tileSources.segments.url, {
+            minZoom: tileSources.segments.minZoom,
+            maxNativeZoom: tileSources.segments.maxZoom,
+            maxZoom: tileSources.segments.maxZoom,
+            interactive: true,
+            vectorTileLayerStyles: {
+              [tileSources.segments.layerName]: (properties: Record<string, unknown>) => {
+                const color = segmentColor(properties.PromDias, symbolData);
+                return { color, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
+              },
+            },
+          });
+          segmentsTiles.on("click", (event: unknown) => {
+            const properties = (event as { layer?: { properties?: Record<string, unknown> } }).layer?.properties;
+            if (properties?.CLASE1) {
+              setSelectedClass(String(properties.CLASE1));
+              setPanelOpen(true);
+            }
+          });
+          segmentsLayerRef.current = segmentsTiles;
+        } else {
+          segmentsLayerRef.current = L.geoJSON(segments as never, {
+            renderer,
+            style: (feature) => {
+              const color = segmentColor(feature?.properties?.PromDias, symbolData);
+              return { color, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
+            },
+            onEachFeature: chooseFeature as never,
+          });
+        }
+
+        if (tileSources.vegetation.url && vectorGrid) {
+          const vegetationTiles = vectorGrid.protobuf(tileSources.vegetation.url, {
+            minZoom: tileSources.vegetation.minZoom,
+            maxNativeZoom: tileSources.vegetation.maxZoom,
+            maxZoom: tileSources.vegetation.maxZoom,
+            interactive: true,
+            vectorTileLayerStyles: {
+              [tileSources.vegetation.layerName]: (properties: Record<string, unknown>) => ({
+                color: "#102f28",
+                fillColor: vegetationColor(properties.CLASE1, symbolData),
+                fillOpacity: 0.93,
+                opacity: 0.56,
+                weight: 0.55,
+              }),
+            },
+          });
+          vegetationTiles.on("click", (event: unknown) => {
+            const properties = (event as { layer?: { properties?: Record<string, unknown> } }).layer?.properties;
+            if (properties?.CLASE1) {
+              setSelectedClass(String(properties.CLASE1));
+              setPanelOpen(true);
+            }
+          });
+          vegetationLayerRef.current = vegetationTiles.addTo(map);
+        } else {
+          vegetationLayerRef.current = L.geoJSON(vegetation as never, {
+            renderer,
+            style: (feature) => ({
+              color: "#102f28",
+              fillColor: vegetationColor(feature?.properties?.CLASE1, symbolData),
+              fillOpacity: 0.93,
+              opacity: 0.56,
+              weight: 0.55,
+            }),
+            onEachFeature: chooseFeature as never,
+          }).addTo(map);
+        }
 
         map.fitBounds(leafletBounds(symbolData.extents?.Vegetacion_Moxos ?? BOUNDS), { padding: [44, 44] });
         map.whenReady(() => {
@@ -292,14 +366,11 @@ export default function Geoportal() {
     const vegetationLayer = vegetationLayerRef.current;
     const segmentsLayer = segmentsLayerRef.current;
     if (!map || !vegetationLayer || !segmentsLayer) return;
-    if (mode === "vegetation") {
-      if (map.hasLayer(segmentsLayer)) map.removeLayer(segmentsLayer);
-      if (!map.hasLayer(vegetationLayer)) vegetationLayer.addTo(map);
-    } else {
-      if (map.hasLayer(vegetationLayer)) map.removeLayer(vegetationLayer);
-      if (!map.hasLayer(segmentsLayer)) segmentsLayer.addTo(map);
-    }
-  }, [mode]);
+    if (layerVisibility.vegetation && !map.hasLayer(vegetationLayer)) vegetationLayer.addTo(map);
+    if (!layerVisibility.vegetation && map.hasLayer(vegetationLayer)) map.removeLayer(vegetationLayer);
+    if (layerVisibility.segments && !map.hasLayer(segmentsLayer)) segmentsLayer.addTo(map);
+    if (!layerVisibility.segments && map.hasLayer(segmentsLayer)) map.removeLayer(segmentsLayer);
+  }, [layerVisibility]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -309,7 +380,7 @@ export default function Geoportal() {
       map.removeLayer(selectedLayerRef.current);
       selectedLayerRef.current = null;
     }
-    if (!selectedClass) return;
+    if (!selectedClass || (!layerVisibility.vegetation && !layerVisibility.segments)) return;
     const matches = vegetationFeatures.current.filter((item) => String(item.properties.CLASE1) === selectedClass);
     if (!matches.length) return;
     selectedLayerRef.current = L.geoJSON({ type: "FeatureCollection", features: matches } as never, {
@@ -317,7 +388,12 @@ export default function Geoportal() {
       interactive: false,
       style: { color: "#fff9e8", fillOpacity: 0, opacity: 1, weight: 3 },
     }).addTo(map);
-  }, [selectedClass]);
+  }, [selectedClass, layerVisibility]);
+
+  const toggleLayer = (layer: ThemeMode) => {
+    setMode(layer);
+    setLayerVisibility((current) => ({ ...current, [layer]: !current[layer] }));
+  };
 
   useEffect(() => {
     const map = mapRef.current;
@@ -327,7 +403,7 @@ export default function Geoportal() {
     const definition = BASE_MAPS[baseMap];
     baseLayerRef.current = L.tileLayer(definition.url, {
       attribution: definition.attribution,
-      maxZoom: 17,
+      maxZoom: 13,
     }).addTo(map);
     baseLayerRef.current.bringToBack();
   }, [baseMap]);
@@ -409,12 +485,20 @@ export default function Geoportal() {
             )}
           </div>
 
-          <div className="theme-switch" aria-label="Tema del mapa">
-            <button className={mode === "vegetation" ? "active" : ""} onClick={() => setMode("vegetation")}>
-              <Leaf size={16} /> Vegetación
+          <div className="theme-switch" aria-label="Visibilidad de capas">
+            <button
+              className={layerVisibility.vegetation ? "active" : ""}
+              onClick={() => toggleLayer("vegetation")}
+              aria-pressed={layerVisibility.vegetation}
+            >
+              <Leaf size={16} /> Vegetación {layerVisibility.vegetation ? <Eye size={14} /> : <EyeOff size={14} />}
             </button>
-            <button className={mode === "segments" ? "active" : ""} onClick={() => setMode("segments")}>
-              <Droplets size={16} /> Permanencia
+            <button
+              className={layerVisibility.segments ? "active" : ""}
+              onClick={() => toggleLayer("segments")}
+              aria-pressed={layerVisibility.segments}
+            >
+              <Droplets size={16} /> Permanencia {layerVisibility.segments ? <Eye size={14} /> : <EyeOff size={14} />}
             </button>
           </div>
         </div>
