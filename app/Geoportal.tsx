@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import type { GeoJSON as LeafletGeoJSON, Layer as LeafletLayer, Map as LeafletMap, TileLayer } from "leaflet";
+import type { Layer as LeafletLayer, Map as LeafletMap, TileLayer } from "leaflet";
 import { feature as topojsonFeature } from "topojson-client";
 import { PMTiles } from "pmtiles";
 import { VectorTile, type VectorTileFeature, type VectorTileLayer } from "@mapbox/vector-tile";
@@ -45,6 +45,7 @@ type TileSource = {
 
 type VectorGridRuntimeLayer = LeafletLayer & {
   _getVectorTilePromise?: (coords: { z: number; x: number; y: number }) => Promise<unknown>;
+  redraw?: () => unknown;
 };
 
 type TileSourcesConfig = {
@@ -209,7 +210,9 @@ export default function Geoportal() {
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
   const vegetationLayerRef = useRef<LeafletLayer | null>(null);
   const segmentsLayerRef = useRef<LeafletLayer | null>(null);
-  const selectedLayerRef = useRef<LeafletGeoJSON | null>(null);
+  const selectedLayerRef = useRef<LeafletLayer | null>(null);
+  const selectionUsesVectorTilesRef = useRef(false);
+  const selectedClassRef = useRef<string | null>(null);
   const baseLayerRef = useRef<TileLayer | null>(null);
   const vegetationFeatures = useRef<GeoFeature[]>([]);
   const [seriesData, setSeriesData] = useState<TimeSeriesData | null>(null);
@@ -364,6 +367,22 @@ export default function Geoportal() {
             }
           });
           vegetationLayerRef.current = vegetationTiles.addTo(map);
+
+          const selectionTiles = createVectorLayer(tileSources.vegetation, {
+            minZoom: tileSources.vegetation.minZoom,
+            maxNativeZoom: tileSources.vegetation.maxZoom,
+            maxZoom: tileSources.vegetation.maxZoom,
+            interactive: false,
+            vectorTileLayerStyles: {
+              [tileSources.vegetation.layerName]: (properties: Record<string, unknown>) =>
+                String(properties.CLASE1) === selectedClassRef.current
+                  ? { color: "#fff9e8", fill: false, fillOpacity: 0, opacity: 1, weight: 3 }
+                  : [],
+            },
+          });
+          if (!selectionTiles) throw new Error("No fue posible inicializar el resaltado de selección.");
+          selectedLayerRef.current = selectionTiles;
+          selectionUsesVectorTilesRef.current = true;
         } else {
           vegetationLayerRef.current = L.geoJSON(vegetation as never, {
             renderer,
@@ -413,11 +432,23 @@ export default function Geoportal() {
     const map = mapRef.current;
     const L = leafletRef.current;
     if (!map || !L) return;
+    selectedClassRef.current = selectedClass;
+    const shouldShowSelection = Boolean(selectedClass && (layerVisibility.vegetation || layerVisibility.segments));
+
+    if (selectionUsesVectorTilesRef.current && selectedLayerRef.current) {
+      if (map.hasLayer(selectedLayerRef.current)) map.removeLayer(selectedLayerRef.current);
+      if (shouldShowSelection) {
+        (selectedLayerRef.current as VectorGridRuntimeLayer).redraw?.();
+        selectedLayerRef.current.addTo(map);
+      }
+      return;
+    }
+
     if (selectedLayerRef.current) {
       map.removeLayer(selectedLayerRef.current);
       selectedLayerRef.current = null;
     }
-    if (!selectedClass || (!layerVisibility.vegetation && !layerVisibility.segments)) return;
+    if (!shouldShowSelection || !selectedClass) return;
     const matches = vegetationFeatures.current.filter((item) => String(item.properties.CLASE1) === selectedClass);
     if (!matches.length) return;
     selectedLayerRef.current = L.geoJSON({ type: "FeatureCollection", features: matches } as never, {
