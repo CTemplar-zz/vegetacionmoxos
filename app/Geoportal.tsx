@@ -376,7 +376,10 @@ export default function Geoportal() {
             vectorTileLayerStyles: {
               [tileSources.vegetation.layerName]: (properties: Record<string, unknown>) =>
                 String(properties.CLASE1) === selectedClassRef.current
-                  ? { color: "#fff9e8", fill: false, fillOpacity: 0, opacity: 1, weight: 3 }
+                  ? [
+                      { color: "#0b3d34", fill: false, fillOpacity: 0, opacity: 0.92, weight: 4 },
+                      { color: "#fff9e8", fill: false, fillOpacity: 0, opacity: 1, weight: 2 },
+                    ]
                   : [],
             },
           });
@@ -433,7 +436,7 @@ export default function Geoportal() {
     const L = leafletRef.current;
     if (!map || !L) return;
     selectedClassRef.current = selectedClass;
-    const shouldShowSelection = Boolean(selectedClass && (layerVisibility.vegetation || layerVisibility.segments));
+    const shouldShowSelection = Boolean(selectedClass);
 
     if (selectionUsesVectorTilesRef.current && selectedLayerRef.current) {
       if (map.hasLayer(selectedLayerRef.current)) map.removeLayer(selectedLayerRef.current);
