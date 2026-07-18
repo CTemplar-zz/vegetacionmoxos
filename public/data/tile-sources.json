@@ -1,12 +1,14 @@
 {
   "vegetation": {
     "url": "",
+    "format": "pmtiles",
     "layerName": "vegetacion",
     "minZoom": 5,
     "maxZoom": 13
   },
   "segments": {
     "url": "",
+    "format": "pmtiles",
     "layerName": "segmentos",
     "minZoom": 5,
     "maxZoom": 13

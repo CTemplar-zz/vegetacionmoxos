@@ -3,6 +3,9 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { GeoJSON as LeafletGeoJSON, Layer as LeafletLayer, Map as LeafletMap, TileLayer } from "leaflet";
 import { feature as topojsonFeature } from "topojson-client";
+import { PMTiles } from "pmtiles";
+import { VectorTile, type VectorTileFeature, type VectorTileLayer } from "@mapbox/vector-tile";
+import { PbfReader } from "pbf";
 import {
   Area,
   AreaChart,
@@ -34,9 +37,14 @@ type ThemeMode = "vegetation" | "segments";
 
 type TileSource = {
   url: string;
+  format: "pmtiles" | "zxy";
   layerName: string;
   minZoom: number;
   maxZoom: number;
+};
+
+type VectorGridRuntimeLayer = LeafletLayer & {
+  _getVectorTilePromise?: (coords: { z: number; x: number; y: number }) => Promise<unknown>;
 };
 
 type TileSourcesConfig = {
@@ -268,12 +276,37 @@ export default function Geoportal() {
 
         const vectorGrid = (L as typeof L & {
           vectorGrid?: {
-            protobuf: (url: string, options: Record<string, unknown>) => LeafletLayer;
+            protobuf: (url: string, options: Record<string, unknown>) => VectorGridRuntimeLayer;
           };
         }).vectorGrid;
 
+        const createVectorLayer = (source: TileSource, options: Record<string, unknown>) => {
+          if (!vectorGrid) return null;
+          const layer = vectorGrid.protobuf(source.format === "zxy" ? source.url : "", options);
+          if (source.format !== "pmtiles") return layer;
+
+          const archive = new PMTiles(source.url);
+          layer._getVectorTilePromise = async ({ z, x, y }) => {
+            const response = await archive.getZxy(z, x, y);
+            if (!response) return { layers: {} };
+
+            const tile = new VectorTile(new PbfReader(response.data));
+            Object.values(tile.layers).forEach((vectorLayer: VectorTileLayer) => {
+              const features: VectorTileFeature[] = [];
+              for (let index = 0; index < vectorLayer.length; index += 1) {
+                const feature = vectorLayer.feature(index) as VectorTileFeature & { geometry?: unknown };
+                feature.geometry = feature.loadGeometry();
+                features.push(feature);
+              }
+              (vectorLayer as VectorTileLayer & { features: VectorTileFeature[] }).features = features;
+            });
+            return tile;
+          };
+          return layer;
+        };
+
         if (tileSources.segments.url && vectorGrid) {
-          const segmentsTiles = vectorGrid.protobuf(tileSources.segments.url, {
+          const segmentsTiles = createVectorLayer(tileSources.segments, {
             minZoom: tileSources.segments.minZoom,
             maxNativeZoom: tileSources.segments.maxZoom,
             maxZoom: tileSources.segments.maxZoom,
@@ -285,6 +318,7 @@ export default function Geoportal() {
               },
             },
           });
+          if (!segmentsTiles) throw new Error("No fue posible inicializar la capa de segmentos.");
           segmentsTiles.on("click", (event: unknown) => {
             const properties = (event as { layer?: { properties?: Record<string, unknown> } }).layer?.properties;
             if (properties?.CLASE1) {
@@ -305,7 +339,7 @@ export default function Geoportal() {
         }
 
         if (tileSources.vegetation.url && vectorGrid) {
-          const vegetationTiles = vectorGrid.protobuf(tileSources.vegetation.url, {
+          const vegetationTiles = createVectorLayer(tileSources.vegetation, {
             minZoom: tileSources.vegetation.minZoom,
             maxNativeZoom: tileSources.vegetation.maxZoom,
             maxZoom: tileSources.vegetation.maxZoom,
@@ -320,6 +354,7 @@ export default function Geoportal() {
               }),
             },
           });
+          if (!vegetationTiles) throw new Error("No fue posible inicializar la capa de vegetación.");
           vegetationTiles.on("click", (event: unknown) => {
             const properties = (event as { layer?: { properties?: Record<string, unknown> } }).layer?.properties;
             if (properties?.CLASE1) {
