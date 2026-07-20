@@ -247,6 +247,7 @@ function FloodTooltip({ active, payload, label }: { active?: boolean; payload?: 
 
 export default function Geoportal() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
+  const searchContainerRef = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
   const leafletRef = useRef<typeof import("leaflet") | null>(null);
   const vegetationLayerRef = useRef<LeafletLayer | null>(null);
@@ -286,6 +287,20 @@ export default function Geoportal() {
   const [zoomRange, setZoomRange] = useState<DateRange | null>(null);
   const [dragStart, setDragStart] = useState<string | null>(null);
   const [dragEnd, setDragEnd] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (!searchOpen) return;
+
+    const closeSearchOnOutsidePointer = (event: PointerEvent) => {
+      const target = event.target;
+      if (target instanceof Node && !searchContainerRef.current?.contains(target)) {
+        setSearchOpen(false);
+      }
+    };
+
+    document.addEventListener("pointerdown", closeSearchOnOutsidePointer);
+    return () => document.removeEventListener("pointerdown", closeSearchOnOutsidePointer);
+  }, [searchOpen]);
 
   useEffect(() => {
     let cancelled = false;
@@ -796,7 +811,7 @@ export default function Geoportal() {
         <div ref={mapContainer} className="map-canvas" />
 
         <div className="map-tools">
-          <div className="search-shell">
+          <div ref={searchContainerRef} className="search-shell">
             <Search size={17} />
             <input
               value={query}
