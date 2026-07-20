@@ -27,7 +27,12 @@ tippecanoe \
 tippecanoe \
   --output="$output_dir/segmentos-z5-z13.pmtiles" \
   --layer=segmentos \
+  --use-attribute-for-id=OBJECTID_1 \
+  --include=OBJECTID_1 \
+  --include=zone \
   --include=CLASE1 \
+  --include=NOM_DEP \
+  --include=DESCRIP \
   --include=PromDias \
   --include=Frec \
   --include=Area \

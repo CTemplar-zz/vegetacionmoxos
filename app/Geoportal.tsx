@@ -14,6 +14,7 @@ import {
   ComposedChart,
   Line,
   ResponsiveContainer,
+  ReferenceLine,
   Tooltip,
   XAxis,
   YAxis,
@@ -26,6 +27,9 @@ import {
   Leaf,
   LocateFixed,
   Map as MapIcon,
+  Maximize2,
+  CalendarPlus,
+  Trash2,
   Eye,
   EyeOff,
   Search,
@@ -82,6 +86,18 @@ type TimeSeriesData = {
   };
   classes: Record<string, VegetationClass>;
 };
+
+type SegmentFloodData = {
+  version: number;
+  idField: "OBJECTID_1";
+  dates: string[];
+  ids: number[];
+  classes: string[];
+  bitsets: string[];
+  floodRule: string;
+};
+
+type FloodLayerItem = { id: string; classId: string; date: string };
 
 type SymbolData = {
   vegetation: {
@@ -213,6 +229,11 @@ export default function Geoportal() {
   const selectedLayerRef = useRef<LeafletLayer | null>(null);
   const selectionUsesVectorTilesRef = useRef(false);
   const selectedClassRef = useRef<string | null>(null);
+  const createVectorLayerRef = useRef<((source: TileSource, options: Record<string, unknown>) => VectorGridRuntimeLayer | null) | null>(null);
+  const segmentTileSourceRef = useRef<TileSource | null>(null);
+  const floodLayerRefs = useRef(new Map<string, LeafletLayer>());
+  const floodDataRef = useRef<SegmentFloodData | null>(null);
+  const segmentRowByIdRef = useRef(new Map<number, number>());
   const baseLayerRef = useRef<TileLayer | null>(null);
   const vegetationFeatures = useRef<GeoFeature[]>([]);
   const [seriesData, setSeriesData] = useState<TimeSeriesData | null>(null);
@@ -229,6 +250,9 @@ export default function Geoportal() {
   const [panelOpen, setPanelOpen] = useState(false);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
+  const [chartExpanded, setChartExpanded] = useState(false);
+  const [selectedFloodDate, setSelectedFloodDate] = useState<string>("");
+  const [floodLayers, setFloodLayers] = useState<FloodLayerItem[]>([]);
 
   useEffect(() => {
     let cancelled = false;
@@ -239,8 +263,9 @@ export default function Geoportal() {
       fetch("/data/vegetation-timeseries.json").then((response) => response.json()),
       fetch("/data/symbology.json").then((response) => response.json()),
       fetch("/data/tile-sources.json").then((response) => response.json()) as Promise<TileSourcesConfig>,
+      fetch("/data/segment-flood-bitsets.json").then((response) => response.json()) as Promise<SegmentFloodData>,
     ])
-      .then(async ([L, vegetationTopology, segmentTopology, timeSeries, symbolData, tileSources]) => {
+      .then(async ([L, vegetationTopology, segmentTopology, timeSeries, symbolData, tileSources, floodData]) => {
         if (cancelled || !mapContainer.current) return;
         (window as Window & { L?: typeof L }).L = L;
         await import("leaflet.vectorgrid");
@@ -249,6 +274,9 @@ export default function Geoportal() {
         vegetationFeatures.current = vegetation.features;
         setSeriesData(timeSeries);
         setSymbols(symbolData);
+        floodDataRef.current = floodData;
+        segmentRowByIdRef.current = new Map(floodData.ids.map((id, index) => [Number(id), index]));
+        segmentTileSourceRef.current = tileSources.segments;
 
         leafletRef.current = L;
         const map = L.map(mapContainer.current, {
@@ -282,6 +310,12 @@ export default function Geoportal() {
           const title = document.createElement("strong");
           title.textContent = properties.CLASE1 ? `Vegetación ${String(properties.CLASE1)}` : "Información del segmento";
           heading.append(eyebrow, title);
+          if (properties.OBJECTID_1 != null) {
+            const identifier = document.createElement("small");
+            identifier.className = "segment-popup-id";
+            identifier.textContent = `ID ${String(properties.OBJECTID_1)}`;
+            heading.append(identifier);
+          }
 
           const metrics = document.createElement("div");
           metrics.className = "segment-popup-metrics";
@@ -347,6 +381,7 @@ export default function Geoportal() {
           };
           return layer;
         };
+        createVectorLayerRef.current = createVectorLayer;
 
         if (tileSources.segments.url && vectorGrid) {
           const segmentsTiles = createVectorLayer(tileSources.segments, {
@@ -356,6 +391,7 @@ export default function Geoportal() {
             interactive: true,
             vectorTileLayerStyles: {
               [tileSources.segments.layerName]: (properties: Record<string, unknown>) => {
+                if (selectedClassRef.current && String(properties.CLASE1) !== selectedClassRef.current) return [];
                 const color = segmentColor(properties.PromDias, symbolData);
                 return { color, fill: true, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
               },
@@ -460,6 +496,7 @@ export default function Geoportal() {
       });
     return () => {
       cancelled = true;
+      floodLayerRefs.current.clear();
       mapRef.current?.remove();
       mapRef.current = null;
     };
@@ -481,6 +518,7 @@ export default function Geoportal() {
     const L = leafletRef.current;
     if (!map || !L) return;
     selectedClassRef.current = selectedClass;
+    (segmentsLayerRef.current as VectorGridRuntimeLayer | null)?.redraw?.();
     const shouldShowSelection = Boolean(selectedClass);
 
     if (selectionUsesVectorTilesRef.current && selectedLayerRef.current) {
@@ -545,6 +583,51 @@ export default function Geoportal() {
       .map((date, index) => ({ date, value: selected.series[index] ?? 0 }))
       .filter((item) => year === "all" || item.date.startsWith(year));
   }, [selected, seriesData, year]);
+
+  useEffect(() => {
+    if (selectedFloodDate && !timeline.some((item) => item.date === selectedFloodDate)) setSelectedFloodDate("");
+  }, [timeline, selectedFloodDate]);
+
+  const removeFloodLayer = (layerId: string) => {
+    const layer = floodLayerRefs.current.get(layerId);
+    if (layer && mapRef.current?.hasLayer(layer)) mapRef.current.removeLayer(layer);
+    floodLayerRefs.current.delete(layerId);
+    setFloodLayers((current) => current.filter((item) => item.id !== layerId));
+  };
+
+  const addFloodLayer = () => {
+    const map = mapRef.current;
+    const source = segmentTileSourceRef.current;
+    const createVectorLayer = createVectorLayerRef.current;
+    const floodData = floodDataRef.current;
+    if (!map || !source || !createVectorLayer || !floodData || !selectedClass || !selectedFloodDate) return;
+    const dateIndex = floodData.dates.indexOf(selectedFloodDate);
+    if (dateIndex < 0) return;
+    const bytes = Uint8Array.from(atob(floodData.bitsets[dateIndex]), (character) => character.charCodeAt(0));
+    const classId = selectedClass;
+    const layerId = `${classId}-${selectedFloodDate}-${Date.now()}`;
+    const layer = createVectorLayer(source, {
+      minZoom: source.minZoom,
+      maxNativeZoom: source.maxZoom,
+      maxZoom: source.maxZoom,
+      interactive: false,
+      vectorTileLayerStyles: {
+        [source.layerName]: (properties: Record<string, unknown>) => {
+          if (String(properties.CLASE1) !== classId) return [];
+          const rowIndex = segmentRowByIdRef.current.get(Number(properties.OBJECTID_1));
+          if (rowIndex == null || (bytes[rowIndex >> 3] & (1 << (rowIndex & 7))) === 0) return [];
+          return { color: "#0d5f95", fill: true, fillColor: "#248ec7", fillOpacity: 0.82, opacity: 0.95, weight: 0.55 };
+        },
+      },
+    });
+    if (!layer) return;
+    layer.addTo(map);
+    floodLayerRefs.current.set(layerId, layer);
+    setFloodLayers((current) => [...current, { id: layerId, classId, date: selectedFloodDate }]);
+    setChartExpanded(false);
+    setLayerVisibility((current) => ({ ...current, segments: true }));
+    setMode("segments");
+  };
 
   const selectClass = (classId: string, zoom = true) => {
     setSelectedClass(classId);
@@ -692,6 +775,18 @@ export default function Geoportal() {
           )}
         </div>
 
+        {floodLayers.length > 0 && (
+          <div className={`flood-layer-control ${panelOpen && selected ? "panel-offset" : ""}`}>
+            <div className="flood-layer-heading"><Droplets size={14} /><span>Capas por fecha</span></div>
+            {floodLayers.map((item) => (
+              <div className="flood-layer-row" key={item.id}>
+                <i /><span><strong>{item.classId}</strong><small>{formatDate(item.date)}</small></span>
+                <button onClick={() => removeFloodLayer(item.id)} aria-label={`Eliminar inundación de ${formatDate(item.date)}`}><Trash2 size={14} /></button>
+              </div>
+            ))}
+          </div>
+        )}
+
         {loading && <div className="loading-screen"><span /><p>Preparando el territorio</p></div>}
         {loadError && <div className="error-screen"><strong>No fue posible abrir el geoportal</strong><p>{loadError}</p></div>}
       </section>
@@ -715,18 +810,18 @@ export default function Geoportal() {
             <section className="chart-section">
               <div className="section-title">
                 <div><span className="eyebrow">Temporalidad</span><h3>Superficie inundada</h3></div>
-                <label>
+                <div className="chart-actions"><label>
                   <span className="sr-only">Periodo del gráfico</span>
                   <select value={year} onChange={(event) => setYear(event.target.value)}>
                     <option value="all">Serie completa</option>
                     {[...seriesData!.years, 2023].reverse().map((item) => <option key={item} value={String(item)}>{item}</option>)}
                   </select>
-                </label>
+                </label><button className="expand-chart" onClick={() => setChartExpanded(true)} aria-label="Ampliar gráfico"><Maximize2 size={15} /></button></div>
               </div>
               <p className="chart-note">Área inundada estimada cada 8 días · km²</p>
               <div className="timeline-chart">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={timeline} margin={{ top: 8, right: 4, left: -20, bottom: 0 }}>
+                  <AreaChart data={timeline} margin={{ top: 8, right: 4, left: -20, bottom: 0 }} onClick={(state) => state?.activeLabel && setSelectedFloodDate(String(state.activeLabel))}>
                     <defs>
                       <linearGradient id="floodGradient" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#1b7f92" stopOpacity={0.46} />
@@ -738,6 +833,7 @@ export default function Geoportal() {
                     <YAxis tick={{ fontSize: 10, fill: "#6c7871" }} axisLine={false} tickLine={false} width={48} />
                     <Tooltip formatter={(value) => [`${detailed.format(Number(value))} km²`, "Superficie"]} labelFormatter={(label) => formatDate(String(label))} contentStyle={{ borderRadius: 12, border: "1px solid #d8dfd9", fontSize: 12 }} />
                     <Area type="monotone" dataKey="value" stroke="#176c7b" strokeWidth={1.6} fill="url(#floodGradient)" isAnimationActive={false} />
+                    {selectedFloodDate && <ReferenceLine x={selectedFloodDate} stroke="#d2693c" strokeWidth={1.5} />}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -766,6 +862,36 @@ export default function Geoportal() {
           </>
         )}
       </aside>
+
+      {chartExpanded && selected && (
+        <div className="chart-modal" role="dialog" aria-modal="true" aria-label="Gráfico ampliado de superficie inundada">
+          <div className="chart-modal-card">
+            <div className="chart-modal-header">
+              <div><span className="eyebrow">Clase {selected.id} · Temporalidad</span><h2>Superficie inundada</h2></div>
+              <button onClick={() => setChartExpanded(false)} aria-label="Cerrar gráfico ampliado"><X size={20} /></button>
+            </div>
+            <p>Seleccione un punto del gráfico o una fecha exacta para representar los segmentos inundados.</p>
+            <div className="expanded-chart">
+              <ResponsiveContainer width="100%" height="100%">
+                <AreaChart data={timeline} margin={{ top: 15, right: 18, left: 2, bottom: 10 }} onClick={(state) => state?.activeLabel && setSelectedFloodDate(String(state.activeLabel))}>
+                  <defs><linearGradient id="floodGradientExpanded" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#1b7f92" stopOpacity={0.55} /><stop offset="100%" stopColor="#1b7f92" stopOpacity={0.04} /></linearGradient></defs>
+                  <CartesianGrid vertical={false} stroke="#dce3dd" strokeDasharray="2 5" />
+                  <XAxis dataKey="date" minTickGap={54} tickFormatter={(value) => year === "all" ? String(value).slice(0, 4) : String(value).slice(5)} tick={{ fontSize: 11, fill: "#6c7871" }} axisLine={false} tickLine={false} />
+                  <YAxis tick={{ fontSize: 11, fill: "#6c7871" }} axisLine={false} tickLine={false} width={62} />
+                  <Tooltip formatter={(value) => [`${detailed.format(Number(value))} km²`, "Superficie"]} labelFormatter={(label) => formatDate(String(label))} contentStyle={{ borderRadius: 12, border: "1px solid #d8dfd9", fontSize: 12 }} />
+                  <Area type="monotone" dataKey="value" stroke="#176c7b" strokeWidth={2} fill="url(#floodGradientExpanded)" isAnimationActive={false} />
+                  {selectedFloodDate && <ReferenceLine x={selectedFloodDate} stroke="#d2693c" strokeWidth={2} />}
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div className="date-layer-builder">
+              <label><span>Fecha seleccionada</span><select value={selectedFloodDate} onChange={(event) => setSelectedFloodDate(event.target.value)}><option value="">Seleccione una fecha</option>{timeline.map((item) => <option value={item.date} key={item.date}>{formatDate(item.date)}</option>)}</select></label>
+              <button onClick={addFloodLayer} disabled={!selectedFloodDate}><CalendarPlus size={17} /> Mostrar inundación en el mapa</button>
+            </div>
+            <small className="flood-rule-note">Azul: segmento con inundación. Los segmentos sin inundación quedan transparentes.</small>
+          </div>
+        </div>
+      )}
     </main>
   );
 }
