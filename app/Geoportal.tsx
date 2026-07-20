@@ -373,6 +373,7 @@ export default function Geoportal() {
               for (let index = 0; index < vectorLayer.length; index += 1) {
                 const feature = vectorLayer.feature(index) as VectorTileFeature & { geometry?: unknown };
                 feature.geometry = feature.loadGeometry();
+                feature.properties = { ...feature.properties, OBJECTID_1: feature.id };
                 features.push(feature);
               }
               (vectorLayer as VectorTileLayer & { features: VectorTileFeature[] }).features = features;
