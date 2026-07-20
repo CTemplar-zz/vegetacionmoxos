@@ -1,12 +1,14 @@
 {
   "vegetation": {
-    "url": "",
+    "url": "https://pub-06c07fa32cf7477ba6aac2a6bffd46e6.r2.dev/Tiles/vegetacion-moxos-z5-z13.pmtiles",
+    "format": "pmtiles",
     "layerName": "vegetacion",
     "minZoom": 5,
     "maxZoom": 13
   },
   "segments": {
-    "url": "",
+    "url": "https://pub-06c07fa32cf7477ba6aac2a6bffd46e6.r2.dev/Tiles/segmentos-z5-z13.pmtiles",
+    "format": "pmtiles",
     "layerName": "segmentos",
     "minZoom": 5,
     "maxZoom": 13
