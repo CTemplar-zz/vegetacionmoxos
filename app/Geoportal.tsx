@@ -72,6 +72,41 @@ type AnnualValue = {
   frequencyPct: number | null;
 };
 
+type HydrologyAnnualValue = {
+  year: number;
+  thresholdKm2: number;
+  thresholdPct: number;
+  exceedanceFrequencyPct: number;
+  durationDays: number;
+  startDate: string | null;
+  endDate: string | null;
+  eventPeakKm2: number;
+  eventExcessKm2Days: number;
+};
+
+type VegetationHydrology = {
+  annual: HydrologyAnnualValue[];
+  longTerm: {
+    meanThresholdKm2: number;
+    meanThresholdPct: number;
+    meanExceedanceFrequencyPct: number;
+    meanDurationDays: number;
+  };
+};
+
+type HydrologyData = {
+  observationIntervalDays: number;
+  years: number[];
+  method: {
+    drySeasonMonths: number[];
+    threshold: string;
+    smoothing: string;
+    frequency: string;
+    duration: string;
+  };
+  classes: Record<string, VegetationHydrology>;
+};
+
 type VegetationClass = {
   id: string;
   description: string;
@@ -340,6 +375,20 @@ function FloodTooltip({ active, payload, label }: { active?: boolean; payload?: 
   );
 }
 
+function HydrologyTooltip({ active, payload }: { active?: boolean; payload?: Array<{ payload?: HydrologyAnnualValue }> }) {
+  const point = payload?.[0]?.payload;
+  if (!active || !point) return null;
+  return (
+    <div className="flood-tooltip hydrology-tooltip">
+      <strong>{point.year}</strong>
+      <span><i className="frequency-dot" />Frecuencia sobre el umbral: {detailed.format(point.exceedanceFrequencyPct)}%</span>
+      <span><i className="duration-dot" />Duración principal: {detailed.format(point.durationDays)} días</span>
+      <span><i className="threshold-dot" />Umbral seco: {detailed.format(point.thresholdKm2)} km² ({detailed.format(point.thresholdPct)}%)</span>
+      <small>{point.startDate && point.endDate ? `${formatDate(point.startDate)} — ${formatDate(point.endDate)}` : "Sin episodio estacional detectado"}</small>
+    </div>
+  );
+}
+
 export default function Geoportal() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const searchContainerRef = useRef<HTMLDivElement | null>(null);
@@ -362,6 +411,7 @@ export default function Geoportal() {
   const baseLayerRef = useRef<TileLayer | null>(null);
   const vegetationFeatures = useRef<GeoFeature[]>([]);
   const [seriesData, setSeriesData] = useState<TimeSeriesData | null>(null);
+  const [hydrologyData, setHydrologyData] = useState<HydrologyData | null>(null);
   const [legendDescriptions, setLegendDescriptions] = useState<VegetationLegendData | null>(null);
   const [symbols, setSymbols] = useState<SymbolData | null>(null);
   const [mode, setMode] = useState<ThemeMode>("vegetation");
@@ -405,12 +455,13 @@ export default function Geoportal() {
       fetch(publicAsset("data/vegetacion_moxos.topojson")).then((response) => response.json()),
       fetch(publicAsset("data/segmentos.topojson")).then((response) => response.json()),
       fetch(publicAsset("data/vegetation-timeseries.json")).then((response) => response.json()),
+      fetch(publicAsset("data/vegetation-hydrology.json")).then((response) => response.json()) as Promise<HydrologyData>,
       fetch(publicAsset("data/vegetation-descriptions.json")).then((response) => response.json()) as Promise<VegetationLegendData>,
       fetch(publicAsset("data/symbology.json")).then((response) => response.json()),
       fetch(publicAsset("data/tile-sources.json")).then((response) => response.json()) as Promise<TileSourcesConfig>,
       fetch(publicAsset("data/segment-flood-bitsets.json")).then((response) => response.json()) as Promise<SegmentFloodData>,
     ])
-      .then(async ([L, vegetationTopology, segmentTopology, timeSeries, vegetationLegend, symbolData, tileSources, floodData]) => {
+      .then(async ([L, vegetationTopology, segmentTopology, timeSeries, hydrology, vegetationLegend, symbolData, tileSources, floodData]) => {
         if (cancelled || !mapContainer.current) return;
         (window as Window & { L?: typeof L }).L = L;
         await import("leaflet.vectorgrid");
@@ -418,6 +469,7 @@ export default function Geoportal() {
         const segments = topologyToFeatures(segmentTopology);
         vegetationFeatures.current = vegetation.features;
         setSeriesData(timeSeries);
+        setHydrologyData(hydrology);
         setLegendDescriptions(vegetationLegend);
         setSymbols(symbolData);
         floodDataRef.current = floodData;
@@ -748,6 +800,10 @@ export default function Geoportal() {
   }, [classList, query]);
 
   const selected = selectedClass && seriesData ? seriesData.classes[selectedClass] : null;
+  const selectedHydrology = selectedClass && hydrologyData ? hydrologyData.classes[selectedClass] : null;
+  const selectedYearHydrology = year === "all"
+    ? null
+    : selectedHydrology?.annual.find((item) => item.year === Number(year)) ?? null;
 
   const timeline = useMemo(() => {
     if (!selected || !seriesData) return [];
@@ -1071,8 +1127,8 @@ export default function Geoportal() {
 
             <div className="metric-grid">
               <article><span>Superficie</span><strong>{detailed.format(selected.areaKm2)}</strong><small>km²</small></article>
-              <article><span>Frecuencia media</span><strong>{detailed.format(selected.longTerm.frequencyPct ?? 0)}</strong><small>% · 2001—2022</small></article>
-              <article><span>Permanencia media</span><strong>{detailed.format(selected.longTerm.permanenceDays ?? 0)}</strong><small>días · 2001—2022</small></article>
+              <article><span>Frecuencia sobre umbral</span><strong>{detailed.format(selectedHydrology?.longTerm.meanExceedanceFrequencyPct ?? 0)}</strong><small>% · 2001—2022</small></article>
+              <article><span>Duración estacional media</span><strong>{detailed.format(selectedHydrology?.longTerm.meanDurationDays ?? 0)}</strong><small>días · 2001—2022</small></article>
             </div>
 
             <section className="chart-section">
@@ -1086,7 +1142,7 @@ export default function Geoportal() {
                   </select>
                 </label><button className="expand-chart" onClick={() => setChartExpanded(true)} aria-label="Ampliar gráfico"><Maximize2 size={15} /></button></div>
               </div>
-              <p className="chart-note">Porcentaje inundado · superficie en km² sobre el eje derecho</p>
+              <p className="chart-note">Porcentaje inundado · superficie en km² sobre el eje derecho{selectedYearHydrology ? ` · umbral seco ${detailed.format(selectedYearHydrology.thresholdPct)}%` : ""}</p>
               <div className="timeline-chart">
                 <ResponsiveContainer width="100%" height="100%">
                   <AreaChart data={timeline} margin={{ top: 8, right: 0, left: -10, bottom: 0 }} onClick={(state) => state?.activeLabel && setSelectedFloodDate(String(state.activeLabel))}>
@@ -1103,7 +1159,10 @@ export default function Geoportal() {
                     <Tooltip content={<FloodTooltip />} />
                     <Area yAxisId="percent" type="monotone" dataKey="percentage" stroke="#176c7b" strokeWidth={1.6} fill="url(#floodGradient)" isAnimationActive={false} />
                     <Line yAxisId="area" type="monotone" dataKey="value" stroke="#174d57" strokeWidth={1} dot={false} activeDot={false} isAnimationActive={false} />
-                    {selectedFloodDate && <ReferenceLine x={selectedFloodDate} stroke="#d2693c" strokeWidth={1.5} />}
+                    {selectedYearHydrology && <ReferenceLine yAxisId="percent" y={selectedYearHydrology.thresholdPct} stroke="#c95d4d" strokeWidth={1.4} strokeDasharray="5 4" />}
+                    {selectedYearHydrology?.startDate && <ReferenceLine yAxisId="percent" x={selectedYearHydrology.startDate} stroke="#315fba" strokeWidth={1.2} />}
+                    {selectedYearHydrology?.endDate && <ReferenceLine yAxisId="percent" x={selectedYearHydrology.endDate} stroke="#315fba" strokeWidth={1.2} />}
+                    {selectedFloodDate && <ReferenceLine yAxisId="percent" x={selectedFloodDate} stroke="#d2693c" strokeWidth={1.5} />}
                   </AreaChart>
                 </ResponsiveContainer>
               </div>
@@ -1111,21 +1170,23 @@ export default function Geoportal() {
             </section>
 
             <section className="chart-section annual-section">
-              <div className="section-title"><div><span className="eyebrow">Índices anuales</span><h3>Frecuencia y permanencia</h3></div></div>
+              <div className="section-title"><div><span className="eyebrow">Índices hidrológicos</span><h3>Excedencia del umbral seco</h3></div></div>
+              <p className="chart-note annual-method">Umbral anual: P90 de julio—octubre · serie suavizada por mediana móvil</p>
               <div className="annual-chart">
                 <ResponsiveContainer width="100%" height="100%">
-                  <ComposedChart data={selected.annual} margin={{ top: 12, right: -4, left: -24, bottom: 0 }}>
+                  <ComposedChart data={selectedHydrology?.annual ?? []} margin={{ top: 12, right: -2, left: -24, bottom: 0 }}>
                     <CartesianGrid vertical={false} stroke="#dce3dd" strokeDasharray="2 5" />
                     <XAxis dataKey="year" minTickGap={22} tick={{ fontSize: 10, fill: "#6c7871" }} axisLine={false} tickLine={false} />
-                    <YAxis yAxisId="frequency" tick={{ fontSize: 10, fill: "#6c7871" }} axisLine={false} tickLine={false} />
-                    <YAxis yAxisId="days" orientation="right" hide />
-                    <Tooltip formatter={(value, name) => name === "Frecuencia" ? [`${detailed.format(Number(value))}%`, name] : [`${detailed.format(Number(value))} días`, name]} contentStyle={{ borderRadius: 12, border: "1px solid #d8dfd9", fontSize: 12 }} />
-                    <Bar yAxisId="frequency" name="Frecuencia" dataKey="frequencyPct" fill="#86b8b1" radius={[3, 3, 0, 0]} maxBarSize={10} />
-                    <Line yAxisId="days" name="Permanencia" dataKey="permanenceDays" stroke="#173f36" strokeWidth={1.8} dot={false} />
+                    <YAxis yAxisId="percent" domain={[0, 100]} tickFormatter={(value) => `${value}%`} tick={{ fontSize: 9, fill: "#6c7871" }} axisLine={false} tickLine={false} />
+                    <YAxis yAxisId="days" orientation="right" tickFormatter={(value) => `${value} d`} tick={{ fontSize: 9, fill: "#173f36" }} axisLine={false} tickLine={false} width={36} />
+                    <Tooltip content={<HydrologyTooltip />} />
+                    <Bar yAxisId="percent" name="Frecuencia sobre umbral" dataKey="exceedanceFrequencyPct" fill="#86b8b1" radius={[3, 3, 0, 0]} maxBarSize={10} />
+                    <Line yAxisId="days" name="Duración principal" dataKey="durationDays" stroke="#173f36" strokeWidth={1.8} dot={false} />
+                    <Line yAxisId="percent" name="Umbral seco" dataKey="thresholdPct" stroke="#c95d4d" strokeWidth={1.2} strokeDasharray="4 3" dot={false} />
                   </ComposedChart>
                 </ResponsiveContainer>
               </div>
-              <div className="chart-key"><span><i className="bar-key" /> Frecuencia (%)</span><span><i className="line-key" /> Permanencia (días)</span></div>
+              <div className="chart-key hydrology-key"><span><i className="bar-key" /> Frecuencia sobre umbral (%)</span><span><i className="line-key" /> Duración (días)</span><span><i className="threshold-key" /> Umbral seco (%)</span></div>
             </section>
 
             <footer className="panel-footer">Fuente: MODIS · observaciones cada 8 días · procesamiento 2001—2023</footer>
@@ -1152,7 +1213,10 @@ export default function Geoportal() {
                   <Tooltip content={<FloodTooltip />} />
                   <Area yAxisId="percent" type="monotone" dataKey="percentage" stroke="#176c7b" strokeWidth={2} fill="url(#floodGradientExpanded)" isAnimationActive={false} />
                   <Line yAxisId="area" type="monotone" dataKey="value" stroke="#174d57" strokeWidth={1.2} dot={false} activeDot={false} isAnimationActive={false} />
-                  {selectedFloodDate && <ReferenceLine x={selectedFloodDate} stroke="#d2693c" strokeWidth={2} />}
+                  {selectedYearHydrology && <ReferenceLine yAxisId="percent" y={selectedYearHydrology.thresholdPct} stroke="#c95d4d" strokeWidth={1.8} strokeDasharray="6 4" label={{ value: `Umbral seco ${detailed.format(selectedYearHydrology.thresholdPct)}%`, position: "insideTopRight", fill: "#a5493d", fontSize: 10 }} />}
+                  {selectedYearHydrology?.startDate && <ReferenceLine yAxisId="percent" x={selectedYearHydrology.startDate} stroke="#315fba" strokeWidth={1.8} />}
+                  {selectedYearHydrology?.endDate && <ReferenceLine yAxisId="percent" x={selectedYearHydrology.endDate} stroke="#315fba" strokeWidth={1.8} />}
+                  {selectedFloodDate && <ReferenceLine yAxisId="percent" x={selectedFloodDate} stroke="#d2693c" strokeWidth={2} />}
                   {dragStart && dragEnd && <ReferenceArea x1={dragStart} x2={dragEnd} yAxisId="percent" fill="#6ca9b3" fillOpacity={0.22} strokeOpacity={0.45} />}
                 </AreaChart>
               </ResponsiveContainer>

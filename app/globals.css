@@ -188,6 +188,11 @@ button { color: inherit; }
 .flood-tooltip i { width: 7px; height: 7px; border-radius: 50%; }
 .percent-dot { background: #1b7f92; }
 .area-dot { background: #174d57; }
+.frequency-dot { background: #86b8b1; }
+.duration-dot { background: #173f36; }
+.threshold-dot { background: #c95d4d; }
+.hydrology-tooltip { min-width: 245px; }
+.hydrology-tooltip small { display: block; margin-top: 8px; padding-top: 7px; border-top: 1px solid #e1e6e1; color: #7a8780; font-size: 8.5px; }
 .annual-chart { height: 148px; margin-top: 8px; }
 .recharts-surface { overflow: visible; }
 .chart-summary { display: flex; justify-content: space-between; gap: 15px; padding: 8px 10px; background: #f0f2ee; border-radius: 7px; color: #748078; font-size: 8.5px; }
@@ -197,6 +202,9 @@ button { color: inherit; }
 .chart-key i { display: inline-block; width: 13px; }
 .bar-key { height: 7px; border-radius: 2px; background: #86b8b1; }
 .line-key { height: 2px; background: #173f36; }
+.threshold-key { height: 2px; background: repeating-linear-gradient(90deg, #c95d4d 0 5px, transparent 5px 8px); }
+.annual-method { max-width: 330px; line-height: 1.45; }
+.hydrology-key { flex-wrap: wrap; gap: 5px 15px; line-height: 1.35; }
 .panel-footer { margin-top: 24px; padding: 14px 0 6px; border-top: 1px solid var(--line); color: #849089; font: 500 8.5px/1.5 var(--font-mono); }
 .chart-modal { position: fixed; z-index: 5000; inset: 0; display: grid; place-items: center; padding: 28px; background: rgba(11,35,29,.72); backdrop-filter: blur(8px); }
 .chart-modal-card { width: min(1120px, 96vw); height: min(760px, 91vh); display: grid; grid-template-rows: auto auto minmax(280px, 1fr) auto auto; padding: 26px 30px 22px; border: 1px solid rgba(255,255,255,.4); border-radius: 20px; background: #fffdf8; box-shadow: 0 30px 90px rgba(8,28,23,.38); }
