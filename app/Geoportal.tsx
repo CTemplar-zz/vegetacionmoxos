@@ -100,7 +100,7 @@ type SegmentFloodData = {
   floodRule: string;
 };
 
-type FloodLayerItem = { id: string; classId: string; date: string; opacity: number };
+type FloodLayerItem = { id: string; classId: string; date: string; opacity: number; visible: boolean };
 
 type TimelinePoint = { date: string; value: number; percentage: number };
 
@@ -711,6 +711,17 @@ export default function Geoportal() {
     setFloodLayers((current) => current.map((item) => item.id === layerId ? { ...item, opacity } : item));
   };
 
+  const toggleFloodLayerVisibility = (layerId: string) => {
+    const item = floodLayers.find((candidate) => candidate.id === layerId);
+    const layer = floodLayerRefs.current.get(layerId);
+    const map = mapRef.current;
+    if (!item || !layer || !map) return;
+    const visible = !item.visible;
+    if (visible && !map.hasLayer(layer)) layer.addTo(map);
+    if (!visible && map.hasLayer(layer)) map.removeLayer(layer);
+    setFloodLayers((current) => current.map((candidate) => candidate.id === layerId ? { ...candidate, visible } : candidate));
+  };
+
   const addFloodLayer = () => {
     const map = mapRef.current;
     const source = segmentTileSourceRef.current;
@@ -742,7 +753,7 @@ export default function Geoportal() {
     if (!layer) return;
     layer.addTo(map);
     floodLayerRefs.current.set(layerId, layer);
-    setFloodLayers((current) => [...current, { id: layerId, classId, date: selectedFloodDate, opacity: 0.82 }]);
+    setFloodLayers((current) => [...current, { id: layerId, classId, date: selectedFloodDate, opacity: 0.82, visible: true }]);
     setChartExpanded(false);
     setLayerVisibility((current) => ({ ...current, segments: true }));
     setMode("segments");
@@ -914,7 +925,7 @@ export default function Geoportal() {
             <div className="flood-layer-heading"><Droplets size={14} /><span>Capas por fecha</span></div>
             {floodLayers.map((item) => (
               <div className="flood-layer-row" key={item.id}>
-                <div className="flood-layer-meta"><i /><span><strong>{item.classId}</strong><small>{formatDate(item.date)}</small></span><button onClick={() => removeFloodLayer(item.id)} aria-label={`Eliminar inundación de ${formatDate(item.date)}`}><Trash2 size={14} /></button></div>
+                <div className={`flood-layer-meta ${item.visible ? "" : "hidden"}`}><i /><span><strong>{item.classId}</strong><small>{formatDate(item.date)}</small></span><button className="visibility-button" onClick={() => toggleFloodLayerVisibility(item.id)} aria-label={`${item.visible ? "Desactivar" : "Activar"} inundación de ${formatDate(item.date)}`}>{item.visible ? <Eye size={14} /> : <EyeOff size={14} />}</button><button onClick={() => removeFloodLayer(item.id)} aria-label={`Eliminar inundación de ${formatDate(item.date)}`}><Trash2 size={14} /></button></div>
                 <label><span>Opacidad <strong>{Math.round(item.opacity * 100)}%</strong></span><input type="range" min="0" max="100" value={Math.round(item.opacity * 100)} onChange={(event) => updateFloodLayerOpacity(item.id, Number(event.target.value) / 100)} /></label>
               </div>
             ))}
