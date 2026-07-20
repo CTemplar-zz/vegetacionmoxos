@@ -15,6 +15,7 @@ import {
   Line,
   ResponsiveContainer,
   ReferenceLine,
+  ReferenceArea,
   Tooltip,
   XAxis,
   YAxis,
@@ -30,6 +31,8 @@ import {
   Maximize2,
   CalendarPlus,
   Trash2,
+  PanelRightOpen,
+  RotateCcw,
   Eye,
   EyeOff,
   Search,
@@ -97,7 +100,11 @@ type SegmentFloodData = {
   floodRule: string;
 };
 
-type FloodLayerItem = { id: string; classId: string; date: string };
+type FloodLayerItem = { id: string; classId: string; date: string; opacity: number };
+
+type TimelinePoint = { date: string; value: number; percentage: number };
+
+type DateRange = { start: string; end: string };
 
 type SymbolData = {
   vegetation: {
@@ -220,6 +227,18 @@ function cleanDescription(description: string, classId: string) {
   return description.slice(classId.length).replace(/^\s*[=:;-]?\s*/, "");
 }
 
+function FloodTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: TimelinePoint }>; label?: string }) {
+  const point = payload?.[0]?.payload;
+  if (!active || !point || !label) return null;
+  return (
+    <div className="flood-tooltip">
+      <strong>{formatDate(String(label))}</strong>
+      <span><i className="percent-dot" />{detailed.format(point.percentage)}% inundado</span>
+      <span><i className="area-dot" />{detailed.format(point.value)} km²</span>
+    </div>
+  );
+}
+
 export default function Geoportal() {
   const mapContainer = useRef<HTMLDivElement | null>(null);
   const mapRef = useRef<LeafletMap | null>(null);
@@ -232,6 +251,10 @@ export default function Geoportal() {
   const createVectorLayerRef = useRef<((source: TileSource, options: Record<string, unknown>) => VectorGridRuntimeLayer | null) | null>(null);
   const segmentTileSourceRef = useRef<TileSource | null>(null);
   const floodLayerRefs = useRef(new Map<string, LeafletLayer>());
+  const floodOpacityRefs = useRef(new Map<string, number>());
+  const layerOpacityRef = useRef({ vegetation: 0.93, segments: 0.92 });
+  const dragStartRef = useRef<string | null>(null);
+  const dragEndRef = useRef<string | null>(null);
   const floodDataRef = useRef<SegmentFloodData | null>(null);
   const segmentRowByIdRef = useRef(new Map<number, number>());
   const baseLayerRef = useRef<TileLayer | null>(null);
@@ -253,6 +276,10 @@ export default function Geoportal() {
   const [chartExpanded, setChartExpanded] = useState(false);
   const [selectedFloodDate, setSelectedFloodDate] = useState<string>("");
   const [floodLayers, setFloodLayers] = useState<FloodLayerItem[]>([]);
+  const [layerOpacity, setLayerOpacity] = useState({ vegetation: 0.93, segments: 0.92 });
+  const [zoomRange, setZoomRange] = useState<DateRange | null>(null);
+  const [dragStart, setDragStart] = useState<string | null>(null);
+  const [dragEnd, setDragEnd] = useState<string | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -394,7 +421,8 @@ export default function Geoportal() {
               [tileSources.segments.layerName]: (properties: Record<string, unknown>) => {
                 if (selectedClassRef.current && String(properties.CLASE1) !== selectedClassRef.current) return [];
                 const color = segmentColor(properties.PromDias, symbolData);
-                return { color, fill: true, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
+                const opacity = layerOpacityRef.current.segments;
+                return { color, fill: true, fillColor: color, fillOpacity: opacity, opacity, weight: 0.45 };
               },
             },
           });
@@ -434,8 +462,8 @@ export default function Geoportal() {
                 color: "#102f28",
                 fill: true,
                 fillColor: vegetationColor(properties.CLASE1, symbolData),
-                fillOpacity: 0.93,
-                opacity: 0.56,
+                fillOpacity: layerOpacityRef.current.vegetation,
+                opacity: layerOpacityRef.current.vegetation,
                 weight: 0.55,
               }),
             },
@@ -498,6 +526,7 @@ export default function Geoportal() {
     return () => {
       cancelled = true;
       floodLayerRefs.current.clear();
+      floodOpacityRefs.current.clear();
       mapRef.current?.remove();
       mapRef.current = null;
     };
@@ -513,6 +542,12 @@ export default function Geoportal() {
     if (layerVisibility.segments && !map.hasLayer(segmentsLayer)) segmentsLayer.addTo(map);
     if (!layerVisibility.segments && map.hasLayer(segmentsLayer)) map.removeLayer(segmentsLayer);
   }, [layerVisibility]);
+
+  useEffect(() => {
+    layerOpacityRef.current = layerOpacity;
+    (vegetationLayerRef.current as VectorGridRuntimeLayer | null)?.redraw?.();
+    (segmentsLayerRef.current as VectorGridRuntimeLayer | null)?.redraw?.();
+  }, [layerOpacity]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -581,19 +616,82 @@ export default function Geoportal() {
   const timeline = useMemo(() => {
     if (!selected || !seriesData) return [];
     return seriesData.dates
-      .map((date, index) => ({ date, value: selected.series[index] ?? 0 }))
+      .map((date, index) => {
+        const value = selected.series[index] ?? 0;
+        const percentage = selected.areaKm2 > 0 ? Math.min(100, (value / selected.areaKm2) * 100) : 0;
+        return { date, value, percentage };
+      })
       .filter((item) => year === "all" || item.date.startsWith(year));
   }, [selected, seriesData, year]);
+
+  const expandedTimeline = useMemo(() => {
+    if (!zoomRange) return timeline;
+    return timeline.filter((item) => item.date >= zoomRange.start && item.date <= zoomRange.end);
+  }, [timeline, zoomRange]);
 
   useEffect(() => {
     if (selectedFloodDate && !timeline.some((item) => item.date === selectedFloodDate)) setSelectedFloodDate("");
   }, [timeline, selectedFloodDate]);
 
+  useEffect(() => {
+    setZoomRange(null);
+    setDragStart(null);
+    setDragEnd(null);
+    dragStartRef.current = null;
+    dragEndRef.current = null;
+  }, [selectedClass, year]);
+
+  const chartLabel = (state: unknown) => {
+    const label = (state as { activeLabel?: unknown } | undefined)?.activeLabel;
+    return label ? String(label) : null;
+  };
+
+  const startChartDrag = (state: unknown) => {
+    const label = chartLabel(state);
+    if (!label) return;
+    dragStartRef.current = label;
+    dragEndRef.current = label;
+    setDragStart(label);
+    setDragEnd(label);
+  };
+
+  const updateChartDrag = (state: unknown) => {
+    if (!dragStartRef.current) return;
+    const label = chartLabel(state);
+    if (!label) return;
+    dragEndRef.current = label;
+    setDragEnd(label);
+  };
+
+  const finishChartDrag = () => {
+    const start = dragStartRef.current;
+    const end = dragEndRef.current;
+    if (start && end) {
+      if (start === end) {
+        setSelectedFloodDate(start);
+      } else {
+        setZoomRange({ start: start < end ? start : end, end: start < end ? end : start });
+        setSelectedFloodDate("");
+      }
+    }
+    dragStartRef.current = null;
+    dragEndRef.current = null;
+    setDragStart(null);
+    setDragEnd(null);
+  };
+
   const removeFloodLayer = (layerId: string) => {
     const layer = floodLayerRefs.current.get(layerId);
     if (layer && mapRef.current?.hasLayer(layer)) mapRef.current.removeLayer(layer);
     floodLayerRefs.current.delete(layerId);
+    floodOpacityRefs.current.delete(layerId);
     setFloodLayers((current) => current.filter((item) => item.id !== layerId));
+  };
+
+  const updateFloodLayerOpacity = (layerId: string, opacity: number) => {
+    floodOpacityRefs.current.set(layerId, opacity);
+    (floodLayerRefs.current.get(layerId) as VectorGridRuntimeLayer | undefined)?.redraw?.();
+    setFloodLayers((current) => current.map((item) => item.id === layerId ? { ...item, opacity } : item));
   };
 
   const addFloodLayer = () => {
@@ -607,6 +705,7 @@ export default function Geoportal() {
     const bytes = Uint8Array.from(atob(floodData.bitsets[dateIndex]), (character) => character.charCodeAt(0));
     const classId = selectedClass;
     const layerId = `${classId}-${selectedFloodDate}-${Date.now()}`;
+    floodOpacityRefs.current.set(layerId, 0.82);
     const layer = createVectorLayer(source, {
       minZoom: source.minZoom,
       maxNativeZoom: source.maxZoom,
@@ -617,14 +716,15 @@ export default function Geoportal() {
           if (String(properties.CLASE1) !== classId) return [];
           const rowIndex = segmentRowByIdRef.current.get(Number(properties.OBJECTID_1));
           if (rowIndex == null || (bytes[rowIndex >> 3] & (1 << (rowIndex & 7))) === 0) return [];
-          return { color: "#0d5f95", fill: true, fillColor: "#248ec7", fillOpacity: 0.82, opacity: 0.95, weight: 0.55 };
+          const opacity = floodOpacityRefs.current.get(layerId) ?? 0.82;
+          return { color: "#0d5f95", fill: true, fillColor: "#248ec7", fillOpacity: opacity, opacity, weight: 0.55 };
         },
       },
     });
     if (!layer) return;
     layer.addTo(map);
     floodLayerRefs.current.set(layerId, layer);
-    setFloodLayers((current) => [...current, { id: layerId, classId, date: selectedFloodDate }]);
+    setFloodLayers((current) => [...current, { id: layerId, classId, date: selectedFloodDate, opacity: 0.82 }]);
     setChartExpanded(false);
     setLayerVisibility((current) => ({ ...current, segments: true }));
     setMode("segments");
@@ -701,6 +801,21 @@ export default function Geoportal() {
               <Droplets size={16} /> Permanencia {layerVisibility.segments ? <Eye size={14} /> : <EyeOff size={14} />}
             </button>
           </div>
+
+          <div className="layer-opacity-control" aria-label="Opacidad de capas principales">
+            <label>
+              <span><Leaf size={13} /> Vegetación <strong>{Math.round(layerOpacity.vegetation * 100)}%</strong></span>
+              <input type="range" min="0" max="100" value={Math.round(layerOpacity.vegetation * 100)} onChange={(event) => setLayerOpacity((current) => ({ ...current, vegetation: Number(event.target.value) / 100 }))} />
+            </label>
+            <label>
+              <span><Droplets size={13} /> Permanencia <strong>{Math.round(layerOpacity.segments * 100)}%</strong></span>
+              <input type="range" min="0" max="100" value={Math.round(layerOpacity.segments * 100)} onChange={(event) => setLayerOpacity((current) => ({ ...current, segments: Number(event.target.value) / 100 }))} />
+            </label>
+          </div>
+
+          {selected && !panelOpen && (
+            <button className="reopen-detail" onClick={() => setPanelOpen(true)}><PanelRightOpen size={16} /><span>Ver detalle de <strong>{selected.id}</strong></span></button>
+          )}
         </div>
 
         <button className="reset-map" onClick={resetExtent} aria-label="Volver a la extensión completa"><LocateFixed size={18} /></button>
@@ -781,8 +896,8 @@ export default function Geoportal() {
             <div className="flood-layer-heading"><Droplets size={14} /><span>Capas por fecha</span></div>
             {floodLayers.map((item) => (
               <div className="flood-layer-row" key={item.id}>
-                <i /><span><strong>{item.classId}</strong><small>{formatDate(item.date)}</small></span>
-                <button onClick={() => removeFloodLayer(item.id)} aria-label={`Eliminar inundación de ${formatDate(item.date)}`}><Trash2 size={14} /></button>
+                <div className="flood-layer-meta"><i /><span><strong>{item.classId}</strong><small>{formatDate(item.date)}</small></span><button onClick={() => removeFloodLayer(item.id)} aria-label={`Eliminar inundación de ${formatDate(item.date)}`}><Trash2 size={14} /></button></div>
+                <label><span>Opacidad <strong>{Math.round(item.opacity * 100)}%</strong></span><input type="range" min="0" max="100" value={Math.round(item.opacity * 100)} onChange={(event) => updateFloodLayerOpacity(item.id, Number(event.target.value) / 100)} /></label>
               </div>
             ))}
           </div>
@@ -819,10 +934,10 @@ export default function Geoportal() {
                   </select>
                 </label><button className="expand-chart" onClick={() => setChartExpanded(true)} aria-label="Ampliar gráfico"><Maximize2 size={15} /></button></div>
               </div>
-              <p className="chart-note">Área inundada estimada cada 8 días · km²</p>
+              <p className="chart-note">Porcentaje inundado · superficie en km² sobre el eje derecho</p>
               <div className="timeline-chart">
                 <ResponsiveContainer width="100%" height="100%">
-                  <AreaChart data={timeline} margin={{ top: 8, right: 4, left: -20, bottom: 0 }} onClick={(state) => state?.activeLabel && setSelectedFloodDate(String(state.activeLabel))}>
+                  <AreaChart data={timeline} margin={{ top: 8, right: 0, left: -10, bottom: 0 }} onClick={(state) => state?.activeLabel && setSelectedFloodDate(String(state.activeLabel))}>
                     <defs>
                       <linearGradient id="floodGradient" x1="0" y1="0" x2="0" y2="1">
                         <stop offset="0%" stopColor="#1b7f92" stopOpacity={0.46} />
@@ -831,9 +946,11 @@ export default function Geoportal() {
                     </defs>
                     <CartesianGrid vertical={false} stroke="#dce3dd" strokeDasharray="2 5" />
                     <XAxis dataKey="date" minTickGap={45} tickFormatter={(value) => year === "all" ? String(value).slice(0, 4) : String(value).slice(5)} tick={{ fontSize: 10, fill: "#6c7871" }} axisLine={false} tickLine={false} />
-                    <YAxis tick={{ fontSize: 10, fill: "#6c7871" }} axisLine={false} tickLine={false} width={48} />
-                    <Tooltip formatter={(value) => [`${detailed.format(Number(value))} km²`, "Superficie"]} labelFormatter={(label) => formatDate(String(label))} contentStyle={{ borderRadius: 12, border: "1px solid #d8dfd9", fontSize: 12 }} />
-                    <Area type="monotone" dataKey="value" stroke="#176c7b" strokeWidth={1.6} fill="url(#floodGradient)" isAnimationActive={false} />
+                    <YAxis yAxisId="percent" domain={[0, "dataMax"]} tickFormatter={(value) => `${detailed.format(Number(value))}%`} tick={{ fontSize: 9, fill: "#176c7b" }} axisLine={false} tickLine={false} width={47} />
+                    <YAxis yAxisId="area" orientation="right" domain={[0, "dataMax"]} tickFormatter={(value) => detailed.format(Number(value))} tick={{ fontSize: 9, fill: "#596a62" }} axisLine={false} tickLine={false} width={51} />
+                    <Tooltip content={<FloodTooltip />} />
+                    <Area yAxisId="percent" type="monotone" dataKey="percentage" stroke="#176c7b" strokeWidth={1.6} fill="url(#floodGradient)" isAnimationActive={false} />
+                    <Line yAxisId="area" type="monotone" dataKey="value" stroke="#174d57" strokeWidth={1} dot={false} activeDot={false} isAnimationActive={false} />
                     {selectedFloodDate && <ReferenceLine x={selectedFloodDate} stroke="#d2693c" strokeWidth={1.5} />}
                   </AreaChart>
                 </ResponsiveContainer>
@@ -871,22 +988,25 @@ export default function Geoportal() {
               <div><span className="eyebrow">Clase {selected.id} · Temporalidad</span><h2>Superficie inundada</h2></div>
               <button onClick={() => setChartExpanded(false)} aria-label="Cerrar gráfico ampliado"><X size={20} /></button>
             </div>
-            <p>Seleccione un punto del gráfico o una fecha exacta para representar los segmentos inundados.</p>
+            <div className="zoom-instructions"><p>Arrastre horizontalmente sobre el gráfico para ampliar un rango. Haga clic en un punto para seleccionar una fecha.</p>{zoomRange && <button onClick={() => setZoomRange(null)}><RotateCcw size={14} /> Restablecer rango</button>}</div>
             <div className="expanded-chart">
               <ResponsiveContainer width="100%" height="100%">
-                <AreaChart data={timeline} margin={{ top: 15, right: 18, left: 2, bottom: 10 }} onClick={(state) => state?.activeLabel && setSelectedFloodDate(String(state.activeLabel))}>
+                <AreaChart data={expandedTimeline} margin={{ top: 15, right: 5, left: 5, bottom: 10 }} onMouseDown={startChartDrag} onMouseMove={updateChartDrag} onMouseUp={finishChartDrag} onMouseLeave={finishChartDrag}>
                   <defs><linearGradient id="floodGradientExpanded" x1="0" y1="0" x2="0" y2="1"><stop offset="0%" stopColor="#1b7f92" stopOpacity={0.55} /><stop offset="100%" stopColor="#1b7f92" stopOpacity={0.04} /></linearGradient></defs>
                   <CartesianGrid vertical={false} stroke="#dce3dd" strokeDasharray="2 5" />
                   <XAxis dataKey="date" minTickGap={54} tickFormatter={(value) => year === "all" ? String(value).slice(0, 4) : String(value).slice(5)} tick={{ fontSize: 11, fill: "#6c7871" }} axisLine={false} tickLine={false} />
-                  <YAxis tick={{ fontSize: 11, fill: "#6c7871" }} axisLine={false} tickLine={false} width={62} />
-                  <Tooltip formatter={(value) => [`${detailed.format(Number(value))} km²`, "Superficie"]} labelFormatter={(label) => formatDate(String(label))} contentStyle={{ borderRadius: 12, border: "1px solid #d8dfd9", fontSize: 12 }} />
-                  <Area type="monotone" dataKey="value" stroke="#176c7b" strokeWidth={2} fill="url(#floodGradientExpanded)" isAnimationActive={false} />
+                  <YAxis yAxisId="percent" domain={[0, "dataMax"]} tickFormatter={(value) => `${detailed.format(Number(value))}%`} tick={{ fontSize: 11, fill: "#176c7b" }} axisLine={false} tickLine={false} width={68} label={{ value: "% inundado", angle: -90, position: "insideLeft", fill: "#176c7b", fontSize: 11 }} />
+                  <YAxis yAxisId="area" orientation="right" domain={[0, "dataMax"]} tickFormatter={(value) => detailed.format(Number(value))} tick={{ fontSize: 11, fill: "#596a62" }} axisLine={false} tickLine={false} width={78} label={{ value: "Superficie (km²)", angle: 90, position: "insideRight", fill: "#596a62", fontSize: 11 }} />
+                  <Tooltip content={<FloodTooltip />} />
+                  <Area yAxisId="percent" type="monotone" dataKey="percentage" stroke="#176c7b" strokeWidth={2} fill="url(#floodGradientExpanded)" isAnimationActive={false} />
+                  <Line yAxisId="area" type="monotone" dataKey="value" stroke="#174d57" strokeWidth={1.2} dot={false} activeDot={false} isAnimationActive={false} />
                   {selectedFloodDate && <ReferenceLine x={selectedFloodDate} stroke="#d2693c" strokeWidth={2} />}
+                  {dragStart && dragEnd && <ReferenceArea x1={dragStart} x2={dragEnd} yAxisId="percent" fill="#6ca9b3" fillOpacity={0.22} strokeOpacity={0.45} />}
                 </AreaChart>
               </ResponsiveContainer>
             </div>
             <div className="date-layer-builder">
-              <label><span>Fecha seleccionada</span><select value={selectedFloodDate} onChange={(event) => setSelectedFloodDate(event.target.value)}><option value="">Seleccione una fecha</option>{timeline.map((item) => <option value={item.date} key={item.date}>{formatDate(item.date)}</option>)}</select></label>
+              <label><span>Fecha seleccionada</span><select value={selectedFloodDate} onChange={(event) => setSelectedFloodDate(event.target.value)}><option value="">Seleccione una fecha</option>{expandedTimeline.map((item) => <option value={item.date} key={item.date}>{formatDate(item.date)}</option>)}</select></label>
               <button onClick={addFloodLayer} disabled={!selectedFloodDate}><CalendarPlus size={17} /> Mostrar inundación en el mapa</button>
             </div>
             <small className="flood-rule-note">Azul: segmento con inundación. Los segmentos sin inundación quedan transparentes.</small>

@@ -70,6 +70,13 @@ button { color: inherit; }
 .theme-switch button { height: 34px; display: flex; align-items: center; gap: 7px; padding: 0 12px; border: 0; border-radius: 8px; background: transparent; color: #64736c; font-size: 11px; font-weight: 600; cursor: pointer; }
 .theme-switch button > svg:last-child { margin-left: 3px; opacity: .76; }
 .theme-switch button.active { background: var(--ink); color: #f7f4e9; }
+.layer-opacity-control { width: 250px; padding: 9px 11px; background: rgba(255,253,248,.95); border: 1px solid rgba(20,53,45,.13); border-radius: 12px; box-shadow: 0 9px 28px rgba(20,53,45,.12); }
+.layer-opacity-control label + label { display: block; margin-top: 7px; }
+.layer-opacity-control label > span, .flood-layer-row label > span { display: flex; align-items: center; gap: 6px; color: #65756d; font-size: 9px; }
+.layer-opacity-control label > span strong, .flood-layer-row label > span strong { margin-left: auto; color: var(--ink); font: 650 9px var(--font-mono); }
+.layer-opacity-control input[type="range"], .flood-layer-row input[type="range"] { width: 100%; height: 3px; margin: 7px 0 1px; accent-color: #246f67; cursor: pointer; }
+.reopen-detail { min-height: 38px; display: flex; align-items: center; gap: 8px; padding: 0 12px; border: 0; border-radius: 10px; background: rgba(20,53,45,.94); color: #fffdf8; box-shadow: 0 9px 28px rgba(20,53,45,.17); font-size: 10px; cursor: pointer; }
+.reopen-detail strong { font-family: var(--font-mono); }
 .reset-map { position: absolute; z-index: 1100; left: 20px; bottom: 20px; width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(20,53,45,.12); border-radius: 12px; background: rgba(255,253,248,.96); box-shadow: 0 9px 28px rgba(20,53,45,.14); cursor: pointer; }
 .reset-map:hover { background: var(--ink); color: #fff; }
 
@@ -117,12 +124,14 @@ button { color: inherit; }
 .flood-layer-control { position: absolute; z-index: 1150; top: 142px; right: 20px; width: 214px; padding: 10px; border: 1px solid rgba(20,53,45,.13); border-radius: 12px; background: rgba(255,253,248,.97); box-shadow: 0 9px 28px rgba(20,53,45,.12); }
 .flood-layer-control.panel-offset { right: 494px; }
 .flood-layer-heading { display: flex; align-items: center; gap: 7px; margin-bottom: 7px; font-size: 10px; font-weight: 650; }
-.flood-layer-row { display: flex; align-items: center; gap: 8px; padding: 7px 4px; border-top: 1px solid #e4e7e2; }
-.flood-layer-row > i { width: 12px; height: 12px; flex: none; border-radius: 3px; background: #248ec7; border: 1px solid #0d5f95; }
-.flood-layer-row > span { min-width: 0; flex: 1; }
+.flood-layer-row { padding: 8px 4px; border-top: 1px solid #e4e7e2; }
+.flood-layer-meta { display: flex; align-items: center; gap: 8px; }
+.flood-layer-meta > i { width: 12px; height: 12px; flex: none; border-radius: 3px; background: #248ec7; border: 1px solid #0d5f95; }
+.flood-layer-meta > span { min-width: 0; flex: 1; }
 .flood-layer-row strong, .flood-layer-row small { display: block; }
 .flood-layer-row strong { font: 650 10px var(--font-mono); }
 .flood-layer-row small { margin-top: 2px; color: #75837c; font-size: 8px; }
+.flood-layer-row label { display: block; margin: 7px 2px 0 20px; }
 .flood-layer-row button { width: 26px; height: 26px; display: grid; place-items: center; border: 0; border-radius: 7px; background: transparent; cursor: pointer; }
 .flood-layer-row button:hover { background: #f2e9e4; color: #9b4f37; }
 .loading-screen, .error-screen { position: absolute; z-index: 2000; inset: 0; display: grid; place-content: center; place-items: center; gap: 12px; background: #e9ede6; }
@@ -154,6 +163,12 @@ button { color: inherit; }
 .expand-chart:hover { background: #edf1eb; }
 .chart-note { margin: 7px 0 0; color: #7c8982; font-size: 9px; }
 .timeline-chart { height: 178px; margin-top: 8px; }
+.flood-tooltip { min-width: 164px; padding: 10px 12px; border: 1px solid #d8dfd9; border-radius: 11px; background: rgba(255,253,248,.98); box-shadow: 0 9px 28px rgba(20,53,45,.14); }
+.flood-tooltip strong { display: block; margin-bottom: 7px; font-size: 10px; }
+.flood-tooltip span { display: flex; align-items: center; gap: 6px; margin-top: 4px; color: #566a61; font-size: 9px; }
+.flood-tooltip i { width: 7px; height: 7px; border-radius: 50%; }
+.percent-dot { background: #1b7f92; }
+.area-dot { background: #174d57; }
 .annual-chart { height: 148px; margin-top: 8px; }
 .recharts-surface { overflow: visible; }
 .chart-summary { display: flex; justify-content: space-between; gap: 15px; padding: 8px 10px; background: #f0f2ee; border-radius: 7px; color: #748078; font-size: 8.5px; }
@@ -169,7 +184,9 @@ button { color: inherit; }
 .chart-modal-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 20px; }
 .chart-modal-header h2 { margin: 5px 0 0; font-size: 24px; }
 .chart-modal-header button { width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 50%; background: transparent; cursor: pointer; }
-.chart-modal-card > p { margin: 10px 0 8px; color: #65766e; font-size: 12px; }
+.zoom-instructions { display: flex; align-items: center; justify-content: space-between; gap: 15px; margin: 10px 0 8px; }
+.zoom-instructions p { margin: 0; color: #65766e; font-size: 12px; }
+.zoom-instructions button { flex: none; height: 32px; display: flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--line); border-radius: 8px; background: #f3f4ef; font-size: 9px; cursor: pointer; }
 .expanded-chart { min-height: 0; cursor: crosshair; }
 .date-layer-builder { display: flex; align-items: flex-end; justify-content: flex-end; gap: 10px; padding-top: 15px; border-top: 1px solid var(--line); }
 .date-layer-builder label span { display: block; margin-bottom: 5px; color: #75837c; font: 600 9px var(--font-mono); text-transform: uppercase; letter-spacing: .08em; }
@@ -196,6 +213,7 @@ button { color: inherit; }
   .detail-panel.open { transform: translateY(0); }
   .map-tools { top: 12px; left: 12px; width: calc(100vw - 24px); }
   .search-shell { min-width: 0; width: 100%; }
+  .layer-opacity-control { width: 230px; }
   .legend-card { left: 64px; bottom: 12px; width: 215px; }
   .reset-map { left: 12px; bottom: 12px; }
   .leaflet-bottom.leaflet-left { display: none; }
@@ -207,6 +225,7 @@ button { color: inherit; }
   .metric-grid strong { font-size: 15px; }
   .chart-modal { padding: 10px; }
   .chart-modal-card { width: 100%; height: 94vh; padding: 20px 15px; }
+  .zoom-instructions { align-items: flex-start; flex-direction: column; }
   .date-layer-builder { align-items: stretch; flex-direction: column; }
   .date-layer-builder select, .date-layer-builder > button { width: 100%; }
 }
