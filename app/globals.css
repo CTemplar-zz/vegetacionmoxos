@@ -152,6 +152,22 @@ button { color: inherit; }
 .detail-swatch { width: 40px; height: 40px; flex: none; border-radius: 11px; box-shadow: inset 0 0 0 1px rgba(0,0,0,.13); }
 .detail-header h2 { margin: 4px 0 0; font: 620 25px/1 var(--font-mono); letter-spacing: -.03em; }
 .description { margin: 20px 0 18px; color: #50635b; font-size: 12px; line-height: 1.58; }
+.detailed-description { margin: 20px 0 19px; color: #50635b; }
+.legend-component + .legend-component { margin-top: 19px; padding-top: 17px; border-top: 1px solid var(--line); }
+.legend-component-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 11px; padding: 8px 10px; border-radius: 8px; background: #edf1eb; }
+.legend-component-heading span { color: #74827b; font: 600 8px var(--font-mono); letter-spacing: .09em; text-transform: uppercase; }
+.legend-component-heading strong { color: var(--ink); font: 680 11px var(--font-mono); }
+.legend-description-block { margin: 0; font-size: 11.4px; line-height: 1.58; text-wrap: pretty; }
+.legend-description-block + .legend-description-block { margin-top: 10px; }
+.legend-description-block.level-0 { padding: 9px 0 9px 11px; border-left: 2px solid #8ca99b; color: #29483f; font-size: 12.5px; line-height: 1.52; }
+.legend-description-block.level-1 { margin-left: 11px; padding-left: 11px; border-left: 1px solid #cad6cf; }
+.legend-description-block.level-2 { margin-left: 25px; }
+.legend-description-block.level-3 { margin-left: 39px; color: #5b6d65; font-size: 10.8px; }
+.legend-description-title { color: var(--ink); font-weight: 650; }
+.legend-description-body { color: #566860; }
+.legend-description-block em { color: #315c50; font-family: Georgia, "Times New Roman", serif; font-style: italic; }
+.legend-description-block strong { font-weight: 700; }
+.legend-description-source { margin-top: 14px; color: #87938d; font: 500 7.5px/1.45 var(--font-mono); }
 .metric-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; }
 .metric-grid article { min-height: 91px; padding: 12px; background: #eef1ec; border: 1px solid #e1e5df; border-radius: 11px; }
 .metric-grid span { display: block; min-height: 25px; color: #718078; font-size: 9px; line-height: 1.25; }

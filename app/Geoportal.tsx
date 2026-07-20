@@ -96,6 +96,28 @@ type TimeSeriesData = {
   classes: Record<string, VegetationClass>;
 };
 
+type VegetationLegendRun = {
+  text: string;
+  bold: boolean;
+  italic: boolean;
+};
+
+type VegetationLegendNode = {
+  code: string;
+  parent: string | null;
+  children: string[];
+  level: number;
+  region: string;
+  title: VegetationLegendRun[];
+  body: VegetationLegendRun[];
+};
+
+type VegetationLegendData = {
+  source: string;
+  nodes: Record<string, VegetationLegendNode>;
+  classes: Record<string, Array<{ code: string; node: string }>>;
+};
+
 type SegmentFloodData = {
   version: number;
   idField: "OBJECTID_1";
@@ -233,6 +255,79 @@ function cleanDescription(description: string, classId: string) {
   return description.slice(classId.length).replace(/^\s*[=:;-]?\s*/, "");
 }
 
+function LegendRuns({ runs }: { runs: VegetationLegendRun[] }) {
+  return runs.map((run, index) => {
+    let content = <>{run.text}</>;
+    if (run.italic) content = <em>{content}</em>;
+    if (run.bold) content = <strong>{content}</strong>;
+    return <span key={`${index}-${run.text.slice(0, 12)}`}>{content}</span>;
+  });
+}
+
+function DetailedVegetationDescription({
+  classId,
+  fallback,
+  legend,
+}: {
+  classId: string;
+  fallback: string;
+  legend: VegetationLegendData | null;
+}) {
+  const components = legend?.classes[classId];
+  if (!legend || !components?.length) return <p className="description">{fallback}</p>;
+
+  const collectNodeCodes = (rootCode: string) => {
+    const root = legend.nodes[rootCode];
+    if (!root) return [];
+    const ancestors: string[] = [];
+    const visited = new Set<string>();
+    let current: VegetationLegendNode | undefined = root;
+    while (current && !visited.has(current.code)) {
+      visited.add(current.code);
+      ancestors.push(current.code);
+      current = current.parent ? legend.nodes[current.parent] : undefined;
+    }
+    ancestors.reverse();
+
+    const descendants: string[] = [];
+    const visitChildren = (code: string) => {
+      legend.nodes[code]?.children.forEach((childCode) => {
+        if (visited.has(childCode)) return;
+        visited.add(childCode);
+        descendants.push(childCode);
+        visitChildren(childCode);
+      });
+    };
+    visitChildren(rootCode);
+    return [...ancestors, ...descendants];
+  };
+
+  return (
+    <section className="detailed-description" aria-label={`Descripción detallada de ${classId}`}>
+      {components.map((component, componentIndex) => (
+        <article className="legend-component" key={`${component.code}-${componentIndex}`}>
+          {components.length > 1 && (
+            <header className="legend-component-heading">
+              <span>Tipo de vegetación {componentIndex + 1}</span>
+              <strong>{component.code}</strong>
+            </header>
+          )}
+          {collectNodeCodes(component.node).map((code) => {
+            const node = legend.nodes[code];
+            return (
+              <p className={`legend-description-block level-${Math.min(node.level, 3)}`} key={`${component.code}-${code}`}>
+                <span className="legend-description-title"><LegendRuns runs={node.title} /></span>
+                {node.body.length > 0 && <span className="legend-description-body"><LegendRuns runs={node.body} /></span>}
+              </p>
+            );
+          })}
+        </article>
+      ))}
+      <footer className="legend-description-source">Fuente: {legend.source}</footer>
+    </section>
+  );
+}
+
 function FloodTooltip({ active, payload, label }: { active?: boolean; payload?: Array<{ payload?: TimelinePoint }>; label?: string }) {
   const point = payload?.[0]?.payload;
   if (!active || !point || !label) return null;
@@ -267,6 +362,7 @@ export default function Geoportal() {
   const baseLayerRef = useRef<TileLayer | null>(null);
   const vegetationFeatures = useRef<GeoFeature[]>([]);
   const [seriesData, setSeriesData] = useState<TimeSeriesData | null>(null);
+  const [legendDescriptions, setLegendDescriptions] = useState<VegetationLegendData | null>(null);
   const [symbols, setSymbols] = useState<SymbolData | null>(null);
   const [mode, setMode] = useState<ThemeMode>("vegetation");
   const [layerVisibility, setLayerVisibility] = useState({ vegetation: true, segments: false });
@@ -309,11 +405,12 @@ export default function Geoportal() {
       fetch(publicAsset("data/vegetacion_moxos.topojson")).then((response) => response.json()),
       fetch(publicAsset("data/segmentos.topojson")).then((response) => response.json()),
       fetch(publicAsset("data/vegetation-timeseries.json")).then((response) => response.json()),
+      fetch(publicAsset("data/vegetation-descriptions.json")).then((response) => response.json()) as Promise<VegetationLegendData>,
       fetch(publicAsset("data/symbology.json")).then((response) => response.json()),
       fetch(publicAsset("data/tile-sources.json")).then((response) => response.json()) as Promise<TileSourcesConfig>,
       fetch(publicAsset("data/segment-flood-bitsets.json")).then((response) => response.json()) as Promise<SegmentFloodData>,
     ])
-      .then(async ([L, vegetationTopology, segmentTopology, timeSeries, symbolData, tileSources, floodData]) => {
+      .then(async ([L, vegetationTopology, segmentTopology, timeSeries, vegetationLegend, symbolData, tileSources, floodData]) => {
         if (cancelled || !mapContainer.current) return;
         (window as Window & { L?: typeof L }).L = L;
         await import("leaflet.vectorgrid");
@@ -321,6 +418,7 @@ export default function Geoportal() {
         const segments = topologyToFeatures(segmentTopology);
         vegetationFeatures.current = vegetation.features;
         setSeriesData(timeSeries);
+        setLegendDescriptions(vegetationLegend);
         setSymbols(symbolData);
         floodDataRef.current = floodData;
         segmentRowByIdRef.current = new Map(floodData.ids.map((id, index) => [Number(id), index]));
@@ -965,7 +1063,11 @@ export default function Geoportal() {
               <span className="detail-swatch" style={{ background: symbols?.vegetation.classes[selected.id]?.color ?? "#799481" }} />
               <div><span className="eyebrow">Clase de vegetación</span><h2>{selected.id}</h2></div>
             </div>
-            <p className="description">{cleanDescription(selected.description, selected.id)}</p>
+            <DetailedVegetationDescription
+              classId={selected.id}
+              fallback={cleanDescription(selected.description, selected.id)}
+              legend={legendDescriptions}
+            />
 
             <div className="metric-grid">
               <article><span>Superficie</span><strong>{detailed.format(selected.areaKm2)}</strong><small>km²</small></article>
