@@ -40,6 +40,12 @@ import {
 } from "lucide-react";
 import "leaflet/dist/leaflet.css";
 
+const PUBLIC_BASE = import.meta.env.BASE_URL ?? "/";
+
+function publicAsset(path: string) {
+  return `${PUBLIC_BASE}${path.replace(/^\/+/, "")}`;
+}
+
 type ThemeMode = "vegetation" | "segments";
 
 type TileSource = {
@@ -285,12 +291,12 @@ export default function Geoportal() {
     let cancelled = false;
     Promise.all([
       import("leaflet"),
-      fetch("/data/vegetacion_moxos.topojson").then((response) => response.json()),
-      fetch("/data/segmentos.topojson").then((response) => response.json()),
-      fetch("/data/vegetation-timeseries.json").then((response) => response.json()),
-      fetch("/data/symbology.json").then((response) => response.json()),
-      fetch("/data/tile-sources.json").then((response) => response.json()) as Promise<TileSourcesConfig>,
-      fetch("/data/segment-flood-bitsets.json").then((response) => response.json()) as Promise<SegmentFloodData>,
+      fetch(publicAsset("data/vegetacion_moxos.topojson")).then((response) => response.json()),
+      fetch(publicAsset("data/segmentos.topojson")).then((response) => response.json()),
+      fetch(publicAsset("data/vegetation-timeseries.json")).then((response) => response.json()),
+      fetch(publicAsset("data/symbology.json")).then((response) => response.json()),
+      fetch(publicAsset("data/tile-sources.json")).then((response) => response.json()) as Promise<TileSourcesConfig>,
+      fetch(publicAsset("data/segment-flood-bitsets.json")).then((response) => response.json()) as Promise<SegmentFloodData>,
     ])
       .then(async ([L, vegetationTopology, segmentTopology, timeSeries, symbolData, tileSources, floodData]) => {
         if (cancelled || !mapContainer.current) return;
