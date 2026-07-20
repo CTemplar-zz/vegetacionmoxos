@@ -508,8 +508,8 @@ export default function Geoportal() {
               [tileSources.vegetation.layerName]: (properties: Record<string, unknown>) =>
                 String(properties.CLASE1) === selectedClassRef.current
                   ? [
-                      { color: "#0b3d34", fill: false, fillOpacity: 0, opacity: 0.92, weight: 4 },
-                      { color: "#fff9e8", fill: false, fillOpacity: 0, opacity: 1, weight: 2 },
+                      { color: "#0b3d34", fill: false, fillOpacity: 0, opacity: 0.9, weight: 2.4 },
+                      { color: "#fff9e8", fill: false, fillOpacity: 0, opacity: 1, weight: 1.2 },
                     ]
                   : [],
             },
@@ -599,7 +599,7 @@ export default function Geoportal() {
       pane: "selectionPane",
       renderer: L.canvas({ padding: 0.45 }),
       interactive: false,
-      style: { color: "#fff9e8", fillOpacity: 0, opacity: 1, weight: 3 },
+      style: { color: "#fff9e8", fillOpacity: 0, opacity: 1, weight: 1.4 },
     }).addTo(map);
   }, [selectedClass, layerVisibility]);
 
