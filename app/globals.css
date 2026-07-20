@@ -38,6 +38,19 @@ button { color: inherit; }
 .leaflet-control-zoom a { width: 32px !important; height: 32px !important; line-height: 31px !important; color: var(--ink) !important; border-color: #e0e5df !important; }
 .leaflet-control-attribution { padding: 2px 6px !important; background: rgba(255,253,248,.82) !important; color: #66746d !important; font-size: 8px !important; }
 .leaflet-control-attribution a { color: #315e54 !important; }
+.segment-popup .leaflet-popup-content-wrapper { padding: 0; overflow: hidden; border: 1px solid rgba(20,53,45,.14); border-radius: 14px; background: rgba(255,253,248,.98); box-shadow: 0 16px 46px rgba(20,53,45,.22); }
+.segment-popup .leaflet-popup-content { width: 252px !important; margin: 0; }
+.segment-popup .leaflet-popup-tip { background: #fffdf8; box-shadow: 2px 2px 4px rgba(20,53,45,.12); }
+.segment-popup .leaflet-popup-close-button { top: 8px !important; right: 8px !important; width: 26px !important; height: 26px !important; color: #52675e !important; font-size: 20px !important; }
+.segment-popup-card { padding: 16px; }
+.segment-popup-heading { padding-right: 24px; }
+.segment-popup-heading span { display: block; color: #78867f; font: 600 9px/1.2 var(--font-mono); letter-spacing: .11em; text-transform: uppercase; }
+.segment-popup-heading strong { display: block; margin-top: 5px; color: var(--ink); font-size: 13px; font-weight: 650; }
+.segment-popup-metrics { display: grid; grid-template-columns: 1fr 1fr; gap: 7px; margin-top: 13px; }
+.segment-popup-metrics > div { padding: 10px; border: 1px solid #e0e5df; border-radius: 9px; background: #eef1ec; }
+.segment-popup-metrics span { display: block; color: #728078; font-size: 9px; }
+.segment-popup-metrics strong { display: block; margin-top: 5px; color: var(--ink); font: 650 17px/1 var(--font-mono); }
+.segment-popup-metrics small { display: block; margin-top: 3px; color: #73817a; font-size: 8px; }
 .map-tools { position: absolute; z-index: 1100; top: 20px; left: 20px; display: flex; flex-direction: column; gap: 10px; align-items: flex-start; }
 .search-shell { width: min(390px, calc(100vw - 540px)); min-width: 310px; height: 48px; display: flex; align-items: center; gap: 10px; padding: 0 14px; background: rgba(255,253,248,.96); border: 1px solid rgba(20,53,45,.13); border-radius: 13px; box-shadow: 0 10px 35px rgba(20,53,45,.13); backdrop-filter: blur(14px); }
 .search-shell > svg { flex: none; color: #6e7f77; }

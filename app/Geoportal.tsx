@@ -267,6 +267,46 @@ export default function Geoportal() {
         }).addTo(map);
 
         const renderer = L.canvas({ padding: 0.45 });
+        const showSegmentPopup = (
+          properties: Record<string, unknown> | undefined,
+          latlng: import("leaflet").LatLng,
+        ) => {
+          if (!properties) return;
+          const content = document.createElement("div");
+          content.className = "segment-popup-card";
+
+          const heading = document.createElement("div");
+          heading.className = "segment-popup-heading";
+          const eyebrow = document.createElement("span");
+          eyebrow.textContent = "Segmento de inundación";
+          const title = document.createElement("strong");
+          title.textContent = properties.CLASE1 ? `Vegetación ${String(properties.CLASE1)}` : "Información del segmento";
+          heading.append(eyebrow, title);
+
+          const metrics = document.createElement("div");
+          metrics.className = "segment-popup-metrics";
+          const addMetric = (label: string, rawValue: unknown, unit: string) => {
+            const metric = document.createElement("div");
+            const labelNode = document.createElement("span");
+            labelNode.textContent = label;
+            const valueNode = document.createElement("strong");
+            const numeric = Number(rawValue);
+            valueNode.textContent = Number.isFinite(numeric) ? detailed.format(numeric) : "Sin dato";
+            const unitNode = document.createElement("small");
+            unitNode.textContent = Number.isFinite(numeric) ? unit : "";
+            metric.append(labelNode, valueNode, unitNode);
+            metrics.append(metric);
+          };
+          addMetric("Frecuencia", properties.Frec, "%");
+          addMetric("Permanencia", properties.PromDias, "días");
+          content.append(heading, metrics);
+
+          L.popup({ className: "segment-popup", closeButton: true, maxWidth: 290, offset: [0, -8] })
+            .setLatLng(latlng)
+            .setContent(content)
+            .openOn(map);
+        };
+
         const chooseFeature = (feature: GeoFeature | undefined, layer: import("leaflet").Layer) => {
           layer.on("click", () => {
             const classId = feature?.properties?.CLASE1;
@@ -323,11 +363,11 @@ export default function Geoportal() {
           });
           if (!segmentsTiles) throw new Error("No fue posible inicializar la capa de segmentos.");
           segmentsTiles.on("click", (event: unknown) => {
-            const properties = (event as { layer?: { properties?: Record<string, unknown> } }).layer?.properties;
-            if (properties?.CLASE1) {
-              setSelectedClass(String(properties.CLASE1));
-              setPanelOpen(true);
-            }
+            const segmentEvent = event as {
+              latlng?: import("leaflet").LatLng;
+              layer?: { properties?: Record<string, unknown> };
+            };
+            if (segmentEvent.latlng) showSegmentPopup(segmentEvent.layer?.properties, segmentEvent.latlng);
           });
           segmentsLayerRef.current = segmentsTiles;
         } else {
@@ -337,7 +377,12 @@ export default function Geoportal() {
               const color = segmentColor(feature?.properties?.PromDias, symbolData);
               return { color, fill: true, fillColor: color, fillOpacity: 0.92, opacity: 0.85, weight: 0.45 };
             },
-            onEachFeature: chooseFeature as never,
+            onEachFeature: ((feature: GeoFeature, layer: import("leaflet").Layer) => {
+              layer.on("click", (event: unknown) => {
+                const latlng = (event as { latlng?: import("leaflet").LatLng }).latlng;
+                if (latlng) showSegmentPopup(feature.properties, latlng);
+              });
+            }) as never,
           });
         }
 
