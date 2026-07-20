@@ -315,6 +315,17 @@ export default function Geoportal() {
         });
         mapRef.current = map;
 
+        const paneLevels = [
+          ["vegetationPane", 410],
+          ["segmentsPane", 420],
+          ["floodPane", 430],
+          ["selectionPane", 440],
+        ] as const;
+        paneLevels.forEach(([name, zIndex]) => {
+          const pane = map.createPane(name);
+          pane.style.zIndex = String(zIndex);
+        });
+
         L.control.zoom({ position: "bottomleft" }).addTo(map);
         baseLayerRef.current = L.tileLayer(BASE_MAPS.topographic.url, {
           attribution: BASE_MAPS.topographic.attribution,
@@ -413,6 +424,7 @@ export default function Geoportal() {
 
         if (tileSources.segments.url && vectorGrid) {
           const segmentsTiles = createVectorLayer(tileSources.segments, {
+            pane: "segmentsPane",
             minZoom: tileSources.segments.minZoom,
             maxNativeZoom: tileSources.segments.maxZoom,
             maxZoom: tileSources.segments.maxZoom,
@@ -437,6 +449,7 @@ export default function Geoportal() {
           segmentsLayerRef.current = segmentsTiles;
         } else {
           segmentsLayerRef.current = L.geoJSON(segments as never, {
+            pane: "segmentsPane",
             renderer,
             style: (feature) => {
               const color = segmentColor(feature?.properties?.PromDias, symbolData);
@@ -453,6 +466,7 @@ export default function Geoportal() {
 
         if (tileSources.vegetation.url && vectorGrid) {
           const vegetationTiles = createVectorLayer(tileSources.vegetation, {
+            pane: "vegetationPane",
             minZoom: tileSources.vegetation.minZoom,
             maxNativeZoom: tileSources.vegetation.maxZoom,
             maxZoom: tileSources.vegetation.maxZoom,
@@ -479,6 +493,7 @@ export default function Geoportal() {
           vegetationLayerRef.current = vegetationTiles.addTo(map);
 
           const selectionTiles = createVectorLayer(tileSources.vegetation, {
+            pane: "selectionPane",
             minZoom: tileSources.vegetation.minZoom,
             maxNativeZoom: tileSources.vegetation.maxZoom,
             maxZoom: tileSources.vegetation.maxZoom,
@@ -498,6 +513,7 @@ export default function Geoportal() {
           selectionUsesVectorTilesRef.current = true;
         } else {
           vegetationLayerRef.current = L.geoJSON(vegetation as never, {
+            pane: "vegetationPane",
             renderer,
             style: (feature) => ({
               color: "#102f28",
@@ -574,6 +590,7 @@ export default function Geoportal() {
     const matches = vegetationFeatures.current.filter((item) => String(item.properties.CLASE1) === selectedClass);
     if (!matches.length) return;
     selectedLayerRef.current = L.geoJSON({ type: "FeatureCollection", features: matches } as never, {
+      pane: "selectionPane",
       renderer: L.canvas({ padding: 0.45 }),
       interactive: false,
       style: { color: "#fff9e8", fillOpacity: 0, opacity: 1, weight: 3 },
@@ -707,6 +724,7 @@ export default function Geoportal() {
     const layerId = `${classId}-${selectedFloodDate}-${Date.now()}`;
     floodOpacityRefs.current.set(layerId, 0.82);
     const layer = createVectorLayer(source, {
+      pane: "floodPane",
       minZoom: source.minZoom,
       maxNativeZoom: source.maxZoom,
       maxZoom: source.maxZoom,
